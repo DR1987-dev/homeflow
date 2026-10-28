@@ -53,11 +53,11 @@ export class HcuBridge {
   async handle(message: PluginMessage): Promise<PluginMessage | undefined> {
     const body = (message.body ?? {}) as Record<string, unknown>;
     switch (message.type) {
-      case "DISCOVER_REQUEST":
-        return this.reply(message, "DISCOVER_RESPONSE", {
-          success: true,
-          devices: this.mapDevices(this.options.devices.list().map((device) => device.id)),
-        });
+      case "DISCOVER_REQUEST": {
+        const devices = this.mapDevices(this.options.devices.list().map((device) => device.id));
+        this.options.log?.(`Discovery: offering ${devices.length} device(s) to the HCU.`);
+        return this.reply(message, "DISCOVER_RESPONSE", { success: true, devices });
+      }
       case "INCLUSION_EVENT":
         this.included.clear();
         for (const id of stringArray(body.deviceIds)) {

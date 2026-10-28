@@ -69,9 +69,15 @@ export class HcuConnectClient {
   private async handle(raw: string): Promise<void> {
     try {
       const message = parsePluginMessage(raw);
+      const isFailure = /^(ERROR_RESPONSE|INVALID_REQUEST|UNKNOWN_REQUEST)$/.test(message.type);
+      // Bodies of other messages may contain credentials (CONFIG_UPDATE_REQUEST), so only failures are logged in full.
+      this.options.log?.(
+        isFailure ? `HCU -> ${message.type}: ${JSON.stringify(message.body)}` : `HCU -> ${message.type}`,
+      );
       const reply =
         (await this.options.onMessage?.(message)) ?? replyTo(this.options.pluginId, message);
       if (reply) {
+        this.options.log?.(`HCU <- ${reply.type}`);
         this.send(reply);
       }
     } catch (error) {
