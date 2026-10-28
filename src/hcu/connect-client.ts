@@ -70,7 +70,7 @@ export class HcuConnectClient {
     try {
       const message = parsePluginMessage(raw);
       const reply =
-        replyTo(this.options.pluginId, message) ?? (await this.options.onMessage?.(message));
+        (await this.options.onMessage?.(message)) ?? replyTo(this.options.pluginId, message);
       if (reply) {
         this.send(reply);
       }

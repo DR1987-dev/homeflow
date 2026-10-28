@@ -47,3 +47,11 @@ Offen: Das Basis-Image `ghcr.io/homematicip/alpine-node-simple:0.0.1` stammt aus
 - `CONTROL_REQUEST` läuft über den `ActionDispatcher` und damit durch die Safety-Policy. Im Plugin ist aktuell eine Deny-all-Policy aktiv: Steuerung ist gesperrt, bis ein Safety-Modul existiert.
 - Der Inklusionsstatus liegt nur im Speicher (nicht persistent).
 - Die Geräteliste ist leer, solange keine Adapter (Anker, Buderus) existieren.
+
+## Anker Solarbank (Cloud, nur lesend)
+
+- Adapter: `src/adapters/anker/`. Nutzt die **inoffizielle** Anker-Cloud-API (reverse engineered von [thomluther/anker-solix-api](https://github.com/thomluther/anker-solix-api), MIT). Sie kann sich jederzeit ändern oder wegfallen.
+- Nur Monitoring: Ladestand (`battery_level`), Solarleistung (`pv_power_w`), Ausgangsleistung (`output_power_w`). Steuern ist nicht implementiert.
+- Der Solarbank 3 (A17C5) wird von der Bibliothek unterstützt. Die Feldnamen der Scene-Info-Antwort für den SB3 sind **nicht an einem echten Gerät verifiziert**.
+- Abfrage alle 60 s (Cloud-Limits), Antworten 30 s gecacht.
+- Konfiguration in HCUweb (Plugin → Konfiguration): E-Mail, Passwort, Land. Die Zugangsdaten liegen in `/data/anker.json` (Rechte 600) im Plugin-Container, nicht im Repository.
