@@ -31,6 +31,11 @@ function fakeCloud() {
             { device_sn: "ABC123", device_name: "Solarbank 3", device_pn: "A17C5", battery_power: "75", photovoltaic_power: "300", output_power: "120" },
           ],
         },
+        grid_info: {
+          grid_list: [{ device_sn: "M1", device_name: "Smart Meter", device_pn: "A17X7" }],
+          grid_to_home_power: "150",
+          photovoltaic_to_grid_power: "40",
+        },
       },
     });
   });
@@ -42,8 +47,11 @@ describe("AnkerCloudClient", () => {
     const { calls, fetchImpl } = fakeCloud();
     const client = new AnkerCloudClient({ email: "a@b.de", password: "hunter2pw", country: "de" }, fetchImpl);
 
-    const banks = await client.fetchSolarbanks();
+    const { solarbanks: banks, meters } = await client.fetchSnapshot();
 
+    expect(meters).toEqual([
+      { sn: "M1", name: "Smart Meter", model: "A17X7", gridPowerW: 110, importPowerW: 150, exportPowerW: 40 },
+    ]);
     expect(banks).toEqual([
       { sn: "ABC123", name: "Solarbank 3", model: "A17C5", stateOfChargePercent: 75, photovoltaicPowerW: 300, outputPowerW: 120 },
     ]);
@@ -59,13 +67,28 @@ describe("AnkerCloudClient", () => {
     const fetchImpl = vi.fn(async () => json({ code: 100053, msg: "Wrong password" })) as unknown as typeof fetch;
     const client = new AnkerCloudClient({ email: "a@b.de", password: "secret", country: "DE" }, fetchImpl);
 
-    await expect(client.fetchSolarbanks()).rejects.toThrow("Anker API error 100053");
+    await expect(client.fetchSnapshot()).rejects.toThrow("Anker API error 100053");
   });
 });
 
 describe("AnkerCloudAdapter", () => {
   const banks = [{ sn: "ABC123", name: "SB3", model: "A17C5", stateOfChargePercent: 50, photovoltaicPowerW: undefined, outputPowerW: 10 }];
-  const adapter = () => new AnkerCloudAdapter({ fetchSolarbanks: async () => banks });
+  const meters = [{ sn: "M1", name: "Meter", model: "A17X7", gridPowerW: -30, importPowerW: 0, exportPowerW: 30 }];
+  const adapter = () => new AnkerCloudAdapter({ fetchSnapshot: async () => ({ solarbanks: banks, meters }) });
+
+  it("exposes the smart meter as read-only energy meter", async () => {
+    const definitions = await adapter().discover();
+    expect(definitions.map((definition) => [definition.id, definition.kind])).toEqual([
+      ["anker-abc123", "battery"],
+      ["anker-m1", "energy-meter"],
+    ]);
+    const readings = await adapter().readState("anker-m1");
+    expect(readings.map((reading) => [reading.capabilityId, reading.value])).toEqual([
+      ["power_w", -30],
+      ["grid_import_w", 0],
+      ["grid_export_w", 30],
+    ]);
+  });
 
   it("describes a read-only battery and skips unknown values", async () => {
     const [device] = await adapter().discover();
@@ -130,7 +153,7 @@ describe("AnkerSetup", () => {
       adapters: new AdapterRegistry(),
       bus: new InMemoryEventBus(),
       pollIntervalMs: 3_600_000,
-      createAdapter: () => new AnkerCloudAdapter({ fetchSolarbanks: async () => [{ sn: "X1", name: "SB", model: "A17C5", stateOfChargePercent: 1, photovoltaicPowerW: 0, outputPowerW: 0 }] }),
+      createAdapter: () => new AnkerCloudAdapter({ fetchSnapshot: async () => ({ meters: [], solarbanks: [{ sn: "X1", name: "SB", model: "A17C5", stateOfChargePercent: 1, photovoltaicPowerW: 0, outputPowerW: 0 }] }) }),
     });
     const msg = (type: string, body: unknown = {}) => ({ id: "1", pluginId: "p", type, body });
 

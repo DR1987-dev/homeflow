@@ -55,3 +55,9 @@ Offen: Das Basis-Image `ghcr.io/homematicip/alpine-node-simple:0.0.1` stammt aus
 - Der Solarbank 3 (A17C5) wird von der Bibliothek unterstützt. Die Feldnamen der Scene-Info-Antwort für den SB3 sind **nicht an einem echten Gerät verifiziert**.
 - Abfrage alle 60 s (Cloud-Limits), Antworten 30 s gecacht.
 - Konfiguration in HCUweb (Plugin → Konfiguration): E-Mail, Passwort, Land. Die Zugangsdaten liegen in `/data/anker.json` (Rechte 600) im Plugin-Container, nicht im Repository.
+
+### Anker Smart Meter (nur lesend)
+
+- Wird aus `grid_info` der Scene-Info des Solarbank-Systems gelesen (`grid_list`, `grid_to_home_power`, `photovoltaic_to_grid_power`) und als `energy-meter` angeboten: `power_w` (Bezug positiv, Einspeisung negativ), `grid_import_w`, `grid_export_w`.
+- Die Werte gelten für den ganzen Standort. Das Verhalten mit einem Anker Smart Meter (A17X7) ist **nicht an einem echten Gerät verifiziert**. Es ist ungeklärt, ob die HCU negative `currentPower`-Werte akzeptiert.
+- Es gibt keine Energiezähler (kWh) für den Meter, weil die Cloud sie nur über zusätzliche, begrenzte Statistik-Endpunkte liefert.

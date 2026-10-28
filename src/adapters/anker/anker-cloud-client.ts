@@ -37,6 +37,21 @@ export interface AnkerSolarbank {
   outputPowerW: number | undefined;
 }
 
+export interface AnkerSmartMeter {
+  sn: string;
+  name: string;
+  model: string;
+  /** Positive when importing from the grid, negative when exporting. */
+  gridPowerW: number | undefined;
+  importPowerW: number | undefined;
+  exportPowerW: number | undefined;
+}
+
+export interface AnkerSnapshot {
+  solarbanks: AnkerSolarbank[];
+  meters: AnkerSmartMeter[];
+}
+
 type Fetch = typeof fetch;
 
 export class AnkerCloudClient {
@@ -53,13 +68,14 @@ export class AnkerCloudClient {
     this.base = EU_COUNTRIES.has(credentials.country.toUpperCase()) ? SERVERS.eu : SERVERS.com;
   }
 
-  async fetchSolarbanks(): Promise<AnkerSolarbank[]> {
+  async fetchSnapshot(): Promise<AnkerSnapshot> {
     const sites = await this.post("power_service/v1/site/get_site_list", {});
     const siteIds = asArray(sites.site_list)
       .map((site) => str(asRecord(site).site_id))
       .filter((id): id is string => Boolean(id));
 
     const banks: AnkerSolarbank[] = [];
+    const meters: AnkerSmartMeter[] = [];
     for (const siteId of siteIds) {
       const scene = await this.post("power_service/v1/site/get_scen_info", { site_id: siteId });
       const list = asArray(asRecord(scene.solarbank_info).solarbank_list);
@@ -79,8 +95,25 @@ export class AnkerCloudClient {
           outputPowerW: num(item.output_power),
         });
       }
+
+      // The smart meter values are site wide: grid_info carries the power flow measured by the meter.
+      const grid = asRecord(scene.grid_info);
+      const meter = asRecord(asArray(grid.grid_list)[0]);
+      const meterSn = str(meter.device_sn);
+      if (meterSn) {
+        const imported = num(grid.grid_to_home_power);
+        const exported = num(grid.photovoltaic_to_grid_power);
+        meters.push({
+          sn: meterSn,
+          name: str(meter.device_name) ?? "Smart Meter",
+          model: str(meter.device_pn) ?? "unknown",
+          gridPowerW: imported === undefined && exported === undefined ? undefined : (imported ?? 0) - (exported ?? 0),
+          importPowerW: imported,
+          exportPowerW: exported,
+        });
+      }
     }
-    return banks;
+    return { solarbanks: banks, meters };
   }
 
   private async login(): Promise<void> {
