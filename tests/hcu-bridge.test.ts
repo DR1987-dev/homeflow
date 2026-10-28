@@ -4,7 +4,7 @@ import { AdapterRegistry } from "../src/adapters/adapter-registry.js";
 import type { DeviceAdapter } from "../src/adapters/device-adapter.js";
 import type { DeviceDefinition } from "../src/domain/device.js";
 import { InMemoryEventBus } from "../src/events/event-bus.js";
-import { HcuBridge } from "../src/hcu/bridge.js";
+import { HcuBridge, hcuDeviceId } from "../src/hcu/bridge.js";
 import type { PluginMessage } from "../src/hcu/connect-api.js";
 import { toCommands, toHcuDevice } from "../src/hcu/device-mapper.js";
 import { DeviceRegistry } from "../src/registry/device-registry.js";
@@ -94,6 +94,14 @@ describe("device mapper", () => {
   });
 });
 
+describe("hcuDeviceId", () => {
+  it("is a stable, valid UUID", () => {
+    expect(hcuDeviceId("anker-abc")).toBe(hcuDeviceId("anker-abc"));
+    expect(hcuDeviceId("anker-abc")).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(hcuDeviceId("a")).not.toBe(hcuDeviceId("b"));
+  });
+});
+
 describe("HcuBridge", () => {
   it("offers only mappable devices on discovery", async () => {
     const { bridge } = setup();
@@ -102,13 +110,13 @@ describe("HcuBridge", () => {
 
     const devices = (reply?.body as { devices: { deviceId: string }[] }).devices;
     expect(reply?.type).toBe("DISCOVER_RESPONSE");
-    expect(devices.map((device) => device.deviceId).sort()).toEqual(["battery-1", "hp-1"]);
+    expect(devices.map((device) => device.deviceId).sort()).toEqual([hcuDeviceId("battery-1"), hcuDeviceId("hp-1")].sort());
   });
 
   it("answers an inclusion with the status of included devices and pushes only their changes", async () => {
     const { bridge, bus, sent } = setup();
 
-    const reply = await bridge.handle(message("INCLUSION_EVENT", { deviceIds: ["battery-1"] }));
+    const reply = await bridge.handle(message("INCLUSION_EVENT", { deviceIds: [hcuDeviceId("battery-1")] }));
     expect(reply?.type).toBe("STATUS_RESPONSE");
 
     const at = "2026-10-28T12:00:00.000Z";
@@ -118,14 +126,14 @@ describe("HcuBridge", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({
       type: "STATUS_EVENT",
-      body: { deviceId: "battery-1", features: [{ type: "batteryState", batteryLevel: 0.8 }] },
+      body: { deviceId: hcuDeviceId("battery-1"), features: [{ type: "batteryState", batteryLevel: 0.8 }] },
     });
   });
 
   it("stops reporting excluded devices", async () => {
     const { bridge, bus, sent } = setup();
-    await bridge.handle(message("INCLUSION_EVENT", { deviceIds: ["battery-1"] }));
-    await bridge.handle(message("EXCLUSION_EVENT", { deviceIds: ["battery-1"] }));
+    await bridge.handle(message("INCLUSION_EVENT", { deviceIds: [hcuDeviceId("battery-1")] }));
+    await bridge.handle(message("EXCLUSION_EVENT", { deviceIds: [hcuDeviceId("battery-1")] }));
 
     await bus.publish({ type: "device.availability.changed", deviceId: "battery-1", available: false, observedAt: "t" });
 
@@ -134,16 +142,16 @@ describe("HcuBridge", () => {
 
   it("executes control requests through the dispatcher", async () => {
     const { bridge, adapter } = setup();
-    await bridge.handle(message("INCLUSION_EVENT", { deviceIds: ["hp-1"] }));
+    await bridge.handle(message("INCLUSION_EVENT", { deviceIds: [hcuDeviceId("hp-1")] }));
 
     const reply = await bridge.handle(
       message("CONTROL_REQUEST", {
-        deviceId: "hp-1",
+        deviceId: hcuDeviceId("hp-1"),
         features: [{ type: "climateOperationMode", climateOperationMode: "HEATING" }],
       }),
     );
 
-    expect(reply?.body).toEqual({ success: true, deviceId: "hp-1" });
+    expect(reply?.body).toEqual({ success: true, deviceId: hcuDeviceId("hp-1") });
     expect(adapter.execute).toHaveBeenCalledWith({ deviceId: "hp-1", capabilityId: "operation_mode", value: "heating" });
   });
 
@@ -153,11 +161,11 @@ describe("HcuBridge", () => {
         throw new Error("denied");
       },
     });
-    await bridge.handle(message("INCLUSION_EVENT", { deviceIds: ["hp-1"] }));
+    await bridge.handle(message("INCLUSION_EVENT", { deviceIds: [hcuDeviceId("hp-1")] }));
 
     const reply = await bridge.handle(
       message("CONTROL_REQUEST", {
-        deviceId: "hp-1",
+        deviceId: hcuDeviceId("hp-1"),
         features: [{ type: "climateOperationMode", climateOperationMode: "AUTO" }],
       }),
     );
@@ -170,7 +178,7 @@ describe("HcuBridge", () => {
     const { bridge, adapter } = setup();
 
     const reply = await bridge.handle(
-      message("CONTROL_REQUEST", { deviceId: "hp-1", features: [{ type: "climateOperationMode", climateOperationMode: "AUTO" }] }),
+      message("CONTROL_REQUEST", { deviceId: hcuDeviceId("hp-1"), features: [{ type: "climateOperationMode", climateOperationMode: "AUTO" }] }),
     );
 
     expect(reply?.body).toMatchObject({ success: false, error: { code: "UNKNOWN_DEVICE" } });

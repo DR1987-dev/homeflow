@@ -12,7 +12,7 @@ import {
   type HcuDevice,
   type HcuFeature,
 } from "./device-mapper.js";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 export interface HcuBridgeOptions {
   pluginId: string;
@@ -55,23 +55,28 @@ export class HcuBridge {
     switch (message.type) {
       case "DISCOVER_REQUEST": {
         const devices = this.mapDevices(this.options.devices.list().map((device) => device.id));
-        this.options.log?.(`Discovery: offering ${devices.length} device(s) to the HCU.`);
+        this.options.log?.(
+          `Discovery: offering ${devices.length} device(s) to the HCU: ${devices
+            .map((d) => `${d.deviceId} ${d.deviceType} [${d.features.map((f) => f.type).join(",")}]`)
+            .join("; ")}`,
+        );
         return this.reply(message, "DISCOVER_RESPONSE", { success: true, devices });
       }
       case "INCLUSION_EVENT":
         this.included.clear();
-        for (const id of stringArray(body.deviceIds)) {
+        for (const id of this.resolveAll(stringArray(body.deviceIds))) {
           this.included.add(id);
         }
+        this.options.log?.(`Inclusion: ${this.included.size} HomeFlow device(s) included.`);
         return this.statusResponse(message, [...this.included]);
       case "EXCLUSION_EVENT":
-        for (const id of stringArray(body.deviceIds)) {
+        for (const id of this.resolveAll(stringArray(body.deviceIds))) {
           this.included.delete(id);
         }
         return undefined;
       case "STATUS_REQUEST": {
         const requested = Array.isArray(body.deviceIds)
-          ? stringArray(body.deviceIds)
+          ? this.resolveAll(stringArray(body.deviceIds))
           : [...this.included];
         return this.statusResponse(message, requested);
       }
@@ -80,6 +85,14 @@ export class HcuBridge {
       default:
         return undefined;
     }
+  }
+
+  private resolve(hcuId: string): string | undefined {
+    return this.options.devices.list().find((device) => hcuDeviceId(device.id) === hcuId)?.id;
+  }
+
+  private resolveAll(hcuIds: readonly string[]): string[] {
+    return hcuIds.flatMap((hcuId) => this.resolve(hcuId) ?? []);
   }
 
   private mapDevices(ids: readonly string[]): HcuDevice[] {
@@ -95,7 +108,7 @@ export class HcuBridge {
         this.options.state.isAvailable(id),
       );
       if (result.ok) {
-        mapped.push(result.device);
+        mapped.push({ ...result.device, deviceId: hcuDeviceId(id) });
       } else {
         this.options.log?.(`Device "${id}" not offered to HCU: ${result.reason}`);
       }
@@ -114,11 +127,12 @@ export class HcuBridge {
     message: PluginMessage,
     body: Record<string, unknown>,
   ): Promise<PluginMessage> {
-    const deviceId = typeof body.deviceId === "string" ? body.deviceId : "";
+    const hcuId = typeof body.deviceId === "string" ? body.deviceId : "";
+    const deviceId = this.resolve(hcuId) ?? hcuId;
     const failure = (code: string, text: string) =>
       this.reply(message, "CONTROL_RESPONSE", {
         success: false,
-        deviceId,
+        deviceId: hcuId,
         error: { code, message: text },
       });
 
@@ -132,7 +146,7 @@ export class HcuBridge {
       for (const command of commands) {
         await this.options.dispatcher.dispatch(command);
       }
-      return this.reply(message, "CONTROL_RESPONSE", { success: true, deviceId });
+      return this.reply(message, "CONTROL_RESPONSE", { success: true, deviceId: hcuId });
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
       this.options.log?.(`Control request for "${deviceId}" rejected: ${text}`);
@@ -145,13 +159,22 @@ export class HcuBridge {
       id: randomUUID(),
       pluginId: this.options.pluginId,
       type: "STATUS_EVENT",
-      body: { deviceId, features },
+      body: { deviceId: hcuDeviceId(deviceId), features },
     });
   }
 
   private reply(message: PluginMessage, type: string, body: unknown): PluginMessage {
     return { id: message.id, pluginId: this.options.pluginId, type, body };
   }
+}
+
+/** The HCU documentation only shows UUID device ids, so HomeFlow ids are mapped to stable name-based UUIDs. */
+export function hcuDeviceId(deviceId: string): string {
+  const bytes = createHash("sha1").update(`homeflow:${deviceId}`).digest().subarray(0, 16);
+  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x50;
+  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function stringArray(value: unknown): string[] {
