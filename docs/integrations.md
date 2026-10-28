@@ -61,3 +61,11 @@ Offen: Das Basis-Image `ghcr.io/homematicip/alpine-node-simple:0.0.1` stammt aus
 - Wird aus `grid_info` der Scene-Info des Solarbank-Systems gelesen (`grid_list`, `grid_to_home_power`, `photovoltaic_to_grid_power`) und als `energy-meter` angeboten: `power_w` (Bezug positiv, Einspeisung negativ), `grid_import_w`, `grid_export_w`.
 - Die Werte gelten für den ganzen Standort. Das Verhalten mit einem Anker Smart Meter (A17X7) ist **nicht an einem echten Gerät verifiziert**. Es ist ungeklärt, ob die HCU negative `currentPower`-Werte akzeptiert.
 - Es gibt keine Energiezähler (kWh) für den Meter, weil die Cloud sie nur über zusätzliche, begrenzte Statistik-Endpunkte liefert.
+
+### Anker Energiebilanz (kWh)
+
+- Quelle: Endpunkt `energy_analysis` (Tageswerte der Anker-App) für `grid` (Netzbezug `grid_to_home_total`, Einspeisung `solar_to_grid_total`) und `solarbank` (`charge_total`, `discharge_total`). Abfrage alle 5 Minuten pro Standort (Cloud-Limit 10–12/min).
+- HomeFlow bildet daraus fortlaufende Zähler: Summe der abgeschlossenen Tage seit dem ersten Start plus Tageswert. Die Zähler starten bei 0, nicht beim Zählerstand des Netzbetreibers. Gespeichert in `/data/anker-energy.json`.
+- Tage, an denen das Plugin nicht lief, werden nicht nachgeholt. Der Tageswechsel richtet sich nach Europe/Berlin.
+- HCU-Semantik `energyCounter`: Smart Meter `in` = Einspeisung, `out` = Netzbezug. Solarbank `in` = Ladung, `out` = Entladung.
+- Die Feldnamen stammen aus der Bibliothek und sind an einem echten Gerät **nicht verifiziert**. Ob das HCU-Energie-Dashboard diese Zähler anzeigt, ist ebenfalls ungeprüft.

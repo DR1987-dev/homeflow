@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { AnkerCloudAdapter } from "../src/adapters/anker/anker-adapter.js";
 import { AnkerCloudClient } from "../src/adapters/anker/anker-cloud-client.js";
+import { EnergyCounters } from "../src/adapters/anker/energy-counter.js";
 import { AdapterPoller } from "../src/adapters/poller.js";
 import { AdapterRegistry } from "../src/adapters/adapter-registry.js";
 import { InMemoryEventBus, type HomeFlowEvents } from "../src/events/event-bus.js";
@@ -50,10 +51,10 @@ describe("AnkerCloudClient", () => {
     const { solarbanks: banks, meters } = await client.fetchSnapshot();
 
     expect(meters).toEqual([
-      { sn: "M1", name: "Smart Meter", model: "A17X7", gridPowerW: 110, importPowerW: 150, exportPowerW: 40 },
+      { siteId: "s1", sn: "M1", name: "Smart Meter", model: "A17X7", gridPowerW: 110, importPowerW: 150, exportPowerW: 40 },
     ]);
     expect(banks).toEqual([
-      { sn: "ABC123", name: "Solarbank 3", model: "A17C5", stateOfChargePercent: 75, photovoltaicPowerW: 300, outputPowerW: 120 },
+      { siteId: "s1", sn: "ABC123", name: "Solarbank 3", model: "A17C5", stateOfChargePercent: 75, photovoltaicPowerW: 300, outputPowerW: 120 },
     ]);
     const login = calls[0]!;
     expect(login.url).toBe("https://ankerpower-api-eu.anker.com/passport/login");
@@ -72,8 +73,8 @@ describe("AnkerCloudClient", () => {
 });
 
 describe("AnkerCloudAdapter", () => {
-  const banks = [{ sn: "ABC123", name: "SB3", model: "A17C5", stateOfChargePercent: 50, photovoltaicPowerW: undefined, outputPowerW: 10 }];
-  const meters = [{ sn: "M1", name: "Meter", model: "A17X7", gridPowerW: -30, importPowerW: 0, exportPowerW: 30 }];
+  const banks = [{ siteId: "s1", sn: "ABC123", name: "SB3", model: "A17C5", stateOfChargePercent: 50, photovoltaicPowerW: undefined, outputPowerW: 10 }];
+  const meters = [{ siteId: "s1", sn: "M1", name: "Meter", model: "A17X7", gridPowerW: -30, importPowerW: 0, exportPowerW: 30 }];
   const adapter = () => new AnkerCloudAdapter({ fetchSnapshot: async () => ({ solarbanks: banks, meters }) });
 
   it("exposes the smart meter as read-only energy meter", async () => {
@@ -153,7 +154,7 @@ describe("AnkerSetup", () => {
       adapters: new AdapterRegistry(),
       bus: new InMemoryEventBus(),
       pollIntervalMs: 3_600_000,
-      createAdapter: () => new AnkerCloudAdapter({ fetchSnapshot: async () => ({ meters: [], solarbanks: [{ sn: "X1", name: "SB", model: "A17C5", stateOfChargePercent: 1, photovoltaicPowerW: 0, outputPowerW: 0 }] }) }),
+      createAdapter: () => new AnkerCloudAdapter({ fetchSnapshot: async () => ({ meters: [], solarbanks: [{ siteId: "s1", sn: "X1", name: "SB", model: "A17C5", stateOfChargePercent: 1, photovoltaicPowerW: 0, outputPowerW: 0 }] }) }),
     });
     const msg = (type: string, body: unknown = {}) => ({ id: "1", pluginId: "p", type, body });
 
@@ -172,5 +173,42 @@ describe("AnkerSetup", () => {
     expect((await setup.handle(msg("PLUGIN_STATE_REQUEST")))?.body).toEqual({ pluginReadinessStatus: "READY" });
     expect(JSON.stringify(await setup.handle(msg("CONFIG_TEMPLATE_REQUEST")))).not.toContain("pw");
     setup.stop();
+  });
+});
+
+describe("EnergyCounters", () => {
+  const day = (gridImportKwh: number) => ({ gridImportKwh, gridExportKwh: 1, batteryChargeKwh: undefined, batteryDischargeKwh: undefined });
+
+  it("accumulates finished days and persists across restarts", async () => {
+    const file = join(await mkdtemp(join(tmpdir(), "hf-")), "energy.json");
+    let now = Date.parse("2026-10-28T10:00:00Z");
+    const stats: Record<string, number> = { "2026-10-28": 2, "2026-10-29": 0.5 };
+    const fetchDay = async (_site: string, _sn: string, date: string) => day(stats[date] ?? 0);
+    const make = () => new EnergyCounters(fetchDay, { file, now: () => now });
+
+    expect((await make().refresh("s1", "sn")).gridImportKwh).toBe(2);
+
+    stats["2026-10-28"] = 3; // final value of the day
+    now = Date.parse("2026-10-29T10:00:00Z");
+    const counters = await make().refresh("s1", "sn");
+
+    expect(counters).toEqual({ gridImportKwh: 3.5, gridExportKwh: 2 });
+  });
+
+  it("offers kWh counters on the meter with HCU in/out semantics", async () => {
+    const counters = new EnergyCounters(async () => ({ gridImportKwh: 5, gridExportKwh: 2, batteryChargeKwh: 7, batteryDischargeKwh: 6 }), {});
+    const adapter = new AnkerCloudAdapter(
+      { fetchSnapshot: async () => ({ solarbanks: [], meters: [{ siteId: "s1", sn: "M1", name: "M", model: "A17X7", gridPowerW: 1, importPowerW: 1, exportPowerW: 0 }] }) },
+      Date.now,
+      counters,
+    );
+    await adapter.discover();
+
+    const readings = await adapter.readState("anker-m1");
+
+    expect(readings.filter((r) => r.capabilityId.startsWith("energy")).map((r) => [r.capabilityId, r.value])).toEqual([
+      ["energy_in_kwh", 2],
+      ["energy_out_kwh", 5],
+    ]);
   });
 });

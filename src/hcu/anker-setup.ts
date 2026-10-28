@@ -1,7 +1,8 @@
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { ANKER_ADAPTER_ID, AnkerCloudAdapter } from "../adapters/anker/anker-adapter.js";
 import { AnkerCloudClient, type AnkerCredentials } from "../adapters/anker/anker-cloud-client.js";
+import { EnergyCounters } from "../adapters/anker/energy-counter.js";
 import { AdapterPoller } from "../adapters/poller.js";
 import type { AdapterRegistry } from "../adapters/adapter-registry.js";
 import type { DeviceAdapter } from "../adapters/device-adapter.js";
@@ -113,8 +114,13 @@ export class AnkerSetup {
   }
 
   private async activate(credentials: AnkerCredentials): Promise<void> {
+    const client = new AnkerCloudClient(credentials);
+    const energy = new EnergyCounters(
+      (siteId, deviceSn, date) => client.fetchDailyEnergy(siteId, deviceSn, date),
+      { file: join(dirname(this.options.dataFile), "anker-energy.json") },
+    );
     const adapter =
-      this.options.createAdapter?.(credentials) ?? new AnkerCloudAdapter(new AnkerCloudClient(credentials));
+      this.options.createAdapter?.(credentials) ?? new AnkerCloudAdapter(client, Date.now, energy);
     const definitions = await adapter.discover();
 
     this.poller?.stop();

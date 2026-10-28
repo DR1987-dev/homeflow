@@ -29,6 +29,7 @@ export interface AnkerCredentials {
 }
 
 export interface AnkerSolarbank {
+  siteId: string;
   sn: string;
   name: string;
   model: string;
@@ -38,6 +39,7 @@ export interface AnkerSolarbank {
 }
 
 export interface AnkerSmartMeter {
+  siteId: string;
   sn: string;
   name: string;
   model: string;
@@ -50,6 +52,14 @@ export interface AnkerSmartMeter {
 export interface AnkerSnapshot {
   solarbanks: AnkerSolarbank[];
   meters: AnkerSmartMeter[];
+}
+
+/** Energy of one day in kWh as shown in the Anker app energy statistics. */
+export interface AnkerDailyEnergy {
+  gridImportKwh: number | undefined;
+  gridExportKwh: number | undefined;
+  batteryChargeKwh: number | undefined;
+  batteryDischargeKwh: number | undefined;
 }
 
 type Fetch = typeof fetch;
@@ -86,6 +96,7 @@ export class AnkerCloudClient {
           continue;
         }
         banks.push({
+          siteId,
           sn,
           name: str(item.device_name) ?? "Solarbank",
           model: str(item.device_pn) ?? "unknown",
@@ -104,6 +115,7 @@ export class AnkerCloudClient {
         const imported = num(grid.grid_to_home_power);
         const exported = num(grid.photovoltaic_to_grid_power);
         meters.push({
+          siteId,
           sn: meterSn,
           name: str(meter.device_name) ?? "Smart Meter",
           model: str(meter.device_pn) ?? "unknown",
@@ -114,6 +126,26 @@ export class AnkerCloudClient {
       }
     }
     return { solarbanks: banks, meters };
+  }
+
+  async fetchDailyEnergy(siteId: string, deviceSn: string, date: string): Promise<AnkerDailyEnergy> {
+    const query = (deviceType: string) =>
+      this.post("power_service/v1/site/energy_analysis", {
+        site_id: siteId,
+        device_sn: deviceSn,
+        device_type: deviceType,
+        type: "day",
+        start_time: date,
+        end_time: "",
+      });
+    const grid = await query("grid");
+    const bank = await query("solarbank");
+    return {
+      gridImportKwh: num(grid.grid_to_home_total),
+      gridExportKwh: num(grid.solar_to_grid_total),
+      batteryChargeKwh: num(bank.charge_total),
+      batteryDischargeKwh: num(bank.discharge_total),
+    };
   }
 
   private async login(): Promise<void> {
