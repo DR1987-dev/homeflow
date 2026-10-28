@@ -1,0 +1,17 @@
+# Homematic IP HCU1 plugin image (ARM64). Build: docker build --platform linux/arm64 -f Dockerfile.hcu -t de/rybosch/david/homeflow:0.1.0 .
+FROM --platform=linux/arm64 node:22-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY tsconfig.json tsconfig.build.json ./
+COPY src ./src
+RUN npm run build
+
+FROM --platform=linux/arm64 ghcr.io/homematicip/alpine-node-simple:0.0.1
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+COPY --from=build /app/dist ./dist
+ENTRYPOINT ["node", "dist/hcu-plugin.js"]
+
+LABEL de.eq3.hmip.plugin.metadata='{"pluginId":"de.rybosch.david.homeflow","issuer":"David Rybosch","version":"0.1.0","hcuMinVersion":"1.4.7","scope":"LOCAL","friendlyName":{"en":"HomeFlow","de":"HomeFlow"},"description":{"en":"Modular smart home, energy and automation platform.","de":"Modulare Smart-Home-, Energie- und Automatisierungsplattform."},"logsEnabled":true}'
