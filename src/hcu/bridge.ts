@@ -117,10 +117,13 @@ export class HcuBridge {
   }
 
   private statusResponse(message: PluginMessage, ids: readonly string[]): PluginMessage {
-    return this.reply(message, "STATUS_RESPONSE", {
-      success: true,
-      devices: this.mapDevices(ids),
-    });
+    const devices = this.mapDevices(ids);
+    this.options.log?.(
+      `Status: ${devices
+        .map((d) => `${d.deviceId.slice(0, 8)} ${d.features.map((f) => describeFeature(f)).join(" ")}`)
+        .join("; ")}`,
+    );
+    return this.reply(message, "STATUS_RESPONSE", { success: true, devices });
   }
 
   private async control(
@@ -175,6 +178,14 @@ export function hcuDeviceId(deviceId: string): string {
   bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
   const hex = bytes.toString("hex");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function describeFeature(feature: HcuFeature): string {
+  const values = Object.entries(feature)
+    .filter(([key]) => key !== "type")
+    .map(([key, value]) => `${key}=${String(value)}`)
+    .join(",");
+  return `${feature.type}(${values})`;
 }
 
 function stringArray(value: unknown): string[] {

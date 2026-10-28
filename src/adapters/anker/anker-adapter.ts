@@ -17,6 +17,7 @@ export class AnkerCloudAdapter implements DeviceAdapter {
     private readonly client: Pick<AnkerCloudClient, "fetchSnapshot">,
     private readonly now: () => number = Date.now,
     private readonly energy?: EnergyCounters,
+    private readonly log?: (line: string) => void,
   ) {}
 
   private readonly energyCache = new Map<string, { at: number; counters: Awaited<ReturnType<EnergyCounters["refresh"]>> }>();
@@ -97,7 +98,8 @@ export class AnkerCloudAdapter implements DeviceAdapter {
       const counters = await this.energy.refresh(siteId, sn);
       this.energyCache.set(siteId, { at: this.now(), counters });
       return counters;
-    } catch {
+    } catch (error) {
+      this.log?.(`Anker energy statistics failed: ${error instanceof Error ? error.message : String(error)}`);
       // Energy statistics are rate limited and optional; power values stay available.
       this.energyCache.set(siteId, { at: this.now(), counters: cached?.counters ?? {} });
       return cached?.counters;

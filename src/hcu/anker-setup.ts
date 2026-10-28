@@ -120,7 +120,7 @@ export class AnkerSetup {
       { file: join(dirname(this.options.dataFile), "anker-energy.json") },
     );
     const adapter =
-      this.options.createAdapter?.(credentials) ?? new AnkerCloudAdapter(client, Date.now, energy);
+      this.options.createAdapter?.(credentials) ?? new AnkerCloudAdapter(client, Date.now, energy, this.options.log);
     const definitions = await adapter.discover();
 
     this.poller?.stop();
@@ -133,7 +133,7 @@ export class AnkerSetup {
       }
     }
     this.credentials = credentials;
-    this.options.log?.(`Anker: ${definitions.length} Solarbank(s) gefunden.`);
+    this.options.log?.(`Anker: ${definitions.length} Gerät(e) gefunden.`);
 
     this.poller = new AdapterPoller({
       adapter,
