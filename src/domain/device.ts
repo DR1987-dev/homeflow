@@ -13,12 +13,22 @@ export type DeviceCapability =
   | (CapabilityBase & { type: "string" })
   | (CapabilityBase & { type: "enum"; values: readonly string[] });
 
+export type DeviceKind =
+  | "battery"
+  | "inverter"
+  | "energy-meter"
+  | "grid-connection-point"
+  | "heat-pump"
+  | "thermostat"
+  | "switch";
+
 export interface DeviceDefinition {
   id: string;
   adapterId: string;
   manufacturer: string;
   model: string;
   name: string;
+  kind?: DeviceKind;
   capabilities: readonly DeviceCapability[];
 }
 

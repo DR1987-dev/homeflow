@@ -37,3 +37,13 @@ Offen: Das Basis-Image `ghcr.io/homematicip/alpine-node-simple:0.0.1` stammt aus
 - [Homematic IP Connect API](https://github.com/homematicip/connect-api) – offizielle Plugin-API der HCU (Dokumentation 1.0.1: Containerisierung, WebSocket, Nachrichten).
 - [Homematic IP Home Control Unit](https://homematic-ip.com/en/product/home-control-unit) – beschreibt Online-/Offline-Modus und EEBUS-Funktionalität.
 - [Home Assistant HomematicIP Cloud](https://www.home-assistant.io/integrations/homematicip_cloud/) – beschreibt den Zugriff auf den Cloud-Server per nicht offiziell dokumentierter, reverse-engineerter API und Access-Point-Konfiguration.
+
+## HCU-Geräte-Mapping
+
+`src/hcu/device-mapper.ts` und `src/hcu/bridge.ts` bilden HomeFlow-Geräte auf die Connect-API ab.
+
+- Ein Gerät wird nur angeboten, wenn `kind` gesetzt ist (`battery`, `inverter`, `energy-meter`, `grid-connection-point`, `heat-pump`, `thermostat`, `switch`) und das für den HCU-Archetyp nötige Feature vorhanden ist. Werte werden nie erfunden.
+- Standard-Capability-IDs: `battery_level` (%, wird zu 0..1), `battery_capacity_wh`, `power_w`, `energy_in_kwh`, `energy_out_kwh`, `target_temperature_c`, `operation_mode`, `on`.
+- `CONTROL_REQUEST` läuft über den `ActionDispatcher` und damit durch die Safety-Policy. Im Plugin ist aktuell eine Deny-all-Policy aktiv: Steuerung ist gesperrt, bis ein Safety-Modul existiert.
+- Der Inklusionsstatus liegt nur im Speicher (nicht persistent).
+- Die Geräteliste ist leer, solange keine Adapter (Anker, Buderus) existieren.

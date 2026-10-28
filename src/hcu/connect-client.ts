@@ -79,7 +79,9 @@ export class HcuConnectClient {
     }
   }
 
-  private send(message: PluginMessage): void {
-    this.socket?.send(JSON.stringify(message));
+  send(message: PluginMessage): void {
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      this.socket.send(JSON.stringify(message));
+    }
   }
 }
