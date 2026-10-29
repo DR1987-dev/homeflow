@@ -15,6 +15,7 @@ export interface HcuConnectOptions {
   /** The HCU serves a self-signed certificate, so validation is off unless a trust store is supplied. */
   rejectUnauthorized?: boolean;
   reconnectDelayMs?: number;
+  onOpen?: () => void;
   onMessage?: (message: PluginMessage) => PluginMessage | undefined | Promise<PluginMessage | undefined>;
   log?: (line: string) => void;
 }
@@ -52,6 +53,7 @@ export class HcuConnectClient {
     socket.on("open", () => {
       log?.("Connected to HCU Connect API");
       this.send(pluginStateResponse(pluginId, randomUUID()));
+      this.options.onOpen?.();
     });
     socket.on("message", (data) => void this.handle(data.toString()));
     socket.on("error", (error) => log?.(`WebSocket error: ${error.message}`));

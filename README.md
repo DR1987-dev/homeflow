@@ -37,8 +37,9 @@ npm run test:watch
 | `adapters` | Hersteller-/Protokolladapter mit stabilem Vertrag | Vertrag vorhanden |
 | `events` | Zustands- und Verfügbarkeitsereignisse | In-Memory-Basis vorhanden |
 | `actions` | Zentral geprüfte Befehlsausführung | Dispatch-Grenze vorhanden |
-| `automation` | Versionierte Regeln und Evaluator | Geplant |
-| `scheduler` | Zeitgesteuerte Auslöser | Geplant |
+| `automation` | Regeln, Engine (Tick-basiert, einmal pro Tag) und Allowlist-Safety | Basis vorhanden; erste Regel: Rollladen bei Sonnenuntergang |
+| `astro` | Sonnenuntergang (NOAA-Formeln) | Vorhanden |
+| `scheduler` | Zeitgesteuerte Auslöser | Minutentakt in der Automation-Engine; eigener Scheduler geplant |
 | `safety` | Rechte, Grenzen, manuelle Übersteuerung und Richtlinien | Schnittstelle vorhanden; Richtlinienimplementierung geplant |
 | `history` | Verlauf und revisionsfähiges Audit | Geplant |
 | `api` | Externe Clients, später REST/WebSocket | Geplant |

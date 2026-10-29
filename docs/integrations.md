@@ -69,3 +69,29 @@ Offen: Das Basis-Image `ghcr.io/homematicip/alpine-node-simple:0.0.1` stammt aus
 - Tage, an denen das Plugin nicht lief, werden nicht nachgeholt. Der Tageswechsel richtet sich nach Europe/Berlin.
 - HCU-Semantik `energyCounter`: Smart Meter `in` = Einspeisung, `out` = Netzbezug. Solarbank `in` = Ladung, `out` = Entladung.
 - Die Feldnamen stammen aus der Bibliothek und sind an einem echten Gerät **nicht verifiziert**. Ob das HCU-Energie-Dashboard diese Zähler anzeigt, ist ebenfalls ungeprüft.
+
+## Rollladen-Automatik (Sonnenuntergang + Helligkeit)
+
+Regel `shutter-sunset` (`src/automation/shutter-sunset.ts`): Der Rollladen schließt einmal pro Tag zum Zeitpunkt `Sonnenuntergang + baseOffsetMinutes + Helligkeitsverschiebung`.
+
+- Die Helligkeit (Lux, gleitender Mittelwert über `smoothingMinutes`) verschiebt die Zeit linear: ab `brightLux` um `lateMinutes` später (sonniger Sommerabend), bei `darkLux` oder darunter um `earlyMinutes` früher (bewölkt). Ohne frischen Sensorwert gilt der neutrale Offset (Standard +15 min).
+- Die Zeit liegt dadurch immer in `[Sonnenuntergang + base − early, Sonnenuntergang + base + late]`. Standard: 15 / 60 / 30 min, 100 / 1000 lx. Die Lux-Schwellen sind Schätzwerte und müssen mit echten Messwerten der Wetterstation abgestimmt werden.
+- Standort und Zeitzone kommen aus dem HCU-Systemzustand (`home.location`, `home.timeZoneId`), nicht aus einer eigenen Konfiguration.
+- Das Plugin liest per Connect API (`/hmip/home/getSystemState` plus `HMIP_SYSTEM_EVENT`) Wetterstation und Rollläden und steuert über `/hmip/device/control/setShutterLevel`. HomeFlow-IDs: `hcu:<HCU-Geräte-ID>:<Kanalindex>`; sie stehen beim Start im Log („HCU device found“). Helligkeit wird aus `averageIllumination`, `illumination` oder `currentIllumination` des Kanals gelesen – **die Feldnamen der HmIP-SWO-PRO sind nicht an echtem Gerät verifiziert**. `shutterLevel` 1.0 = geschlossen (HmIP-Konvention).
+- **Ein/Aus in der App:** Das Plugin bietet den virtuellen Schalter „Rollladen-Automatik“ (`automation:shutter-sunset`) an. Nach der Geräte-Suche im Plugin in der Homematic-IP-App hinzufügen (INCLUSION); der Schalter schaltet die Automatik an/aus. Der Zustand wird in `/data/automation-switches.json` gespeichert und überlebt Neustarts (Standard beim ersten Start: an). Ob die App den Schalter wie erwartet darstellt, ist nicht an echter HCU verifiziert.
+- Der Schalter existiert nur, wenn `/data/shutter-sunset.json` mit `enabled: true` vorhanden ist; ohne Datei ist die Steuerung komplett gesperrt.
+- **Auswahl der Rollläden/Beschattungsgruppen:** In HCUweb (Plugin → Konfiguration, Bereich „Rollladen-Automatik“) erscheint pro gefundenem Rollladen und pro Beschattungsgruppe eine Checkbox (Connect API kennt kein Mehrfach-Auswahlfeld). Die Auswahl wird in `/data/shutter-selection.json` gespeichert; solange sie nie gespeichert wurde, gilt `shutterDeviceIds` aus der Config. Ein Rollladen und seine Gruppe sollten nicht gleichzeitig gewählt werden. Eine Gruppe wird über `/hmip/group/switching/setPrimaryShadingLevel` gesteuert (ID `hcu-group:<Gruppen-ID>`); als Beschattungsgruppe gilt eine `SWITCHING`-Gruppe, deren Kanäle alle Rollläden sind – **nicht an echter HCU verifiziert**. Die Liste füllt sich erst nach dem Laden des Systemzustands (Konfigurationsseite ggf. neu laden). Die Anker-Einstellungen stehen auf derselben Seite.
+- Aktivierung der Konfiguration über `/data/shutter-sunset.json`; ohne Datei bleibt jede Steuerung gesperrt. Die Safety-Policy erlaubt nur `shutter_level` der gelisteten Rollläden. Nach Erfolg wird der Tag in `/data/automation-state.json` vermerkt (kein erneutes Schließen nach manuellem Öffnen oder Neustart); bei Fehlern gibt es bis zu 5 Versuche pro Tag. Bereits geschlossene Rollläden werden nicht angefahren.
+
+```json
+{
+  "enabled": true,
+  "shutterDeviceIds": ["hcu:3014F711A0000000000001:1"],
+  "sensorDeviceId": "hcu:3014F711A0000000000002:1",
+  "baseOffsetMinutes": 15,
+  "earlyMinutes": 60,
+  "lateMinutes": 30,
+  "darkLux": 100,
+  "brightLux": 1000
+}
+```
