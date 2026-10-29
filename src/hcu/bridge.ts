@@ -158,6 +158,9 @@ export class HcuBridge {
   }
 
   private sendStatusEvent(deviceId: string, features: HcuFeature[]): void {
+    this.options.log?.(
+      `Status event: ${hcuDeviceId(deviceId).slice(0, 8)} ${features.map(describeFeature).join(" ")}`,
+    );
     this.options.send({
       id: randomUUID(),
       pluginId: this.options.pluginId,
