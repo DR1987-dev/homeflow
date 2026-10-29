@@ -41,7 +41,7 @@ describe("Home Connect client and adapter", () => {
         data: { status: [{ key: "BSH.Common.Status.OperationState", value: "Ready" }] },
       }))
       .mockResolvedValueOnce(jsonResponse({
-        data: { homeappliance: { haId: "ha-1", connected: true } },
+        data: { haId: "ha-1", connected: true },
       }))
       .mockResolvedValueOnce(jsonResponse({
         data: { status: [{ key: "BSH.Common.Status.OperationState", value: "Run" }] },
@@ -87,7 +87,7 @@ describe("Home Connect client and adapter", () => {
         data: { homeappliances: [{ haId: "ha-offline", connected: false }] },
       }))
       .mockResolvedValueOnce(jsonResponse({
-        data: { homeappliance: { haId: "ha-offline", connected: false } },
+        data: { haId: "ha-offline", connected: false },
       }));
     const adapter = new HomeConnectAdapter(new HomeConnectClient({ ...credentials, fetcher }));
 

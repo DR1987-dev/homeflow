@@ -86,7 +86,7 @@ export class HomeConnectClient {
 
   async getAppliance(haId: string): Promise<HomeConnectAppliance> {
     const body = await this.request(`/homeappliances/${encodeURIComponent(haId)}`);
-    return parseAppliance(record(body.data).homeappliance);
+    return parseAppliance(body.data);
   }
 
   async getStatus(haId: string): Promise<readonly HomeConnectStatusFeature[]> {
