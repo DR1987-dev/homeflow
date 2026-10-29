@@ -11,6 +11,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json",
+    "home-connect:test": "node scripts/home-connect-test.mjs",
     "start": "node dist/main.js"
   },
   "devDependencies": {

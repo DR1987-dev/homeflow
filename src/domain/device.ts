@@ -1,10 +1,12 @@
 export type CapabilityValue = boolean | number | string;
+export type CapabilitySupportStatus = "SUPPORTED" | "UNVERIFIED" | "BLOCKED" | "UNAVAILABLE";
 
 interface CapabilityBase {
   id: string;
   label: string;
   readable: boolean;
   writable: boolean;
+  supportStatus?: CapabilitySupportStatus;
 }
 
 export type DeviceCapability =

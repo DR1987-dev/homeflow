@@ -2,6 +2,13 @@
 
 Stand der Recherche: 28.10.2026. „Nicht nachgewiesen“ bedeutet, dass HomeFlow diese Schnittstelle nicht als verfügbar voraussetzt; es ist keine Aussage, dass ein Gerät grundsätzlich keine Schnittstelle besitzt.
 
+## Bosch
+
+| Integration | HomeFlow-Status |
+|---|---|
+| [Bosch Home Connect](./integrations/bosch-home-connect.md) | OAuth-geschützte Geräteliste und dynamische, schreibgeschützte Statuswerte sind implementiert. Keine Gerätezugangsdaten oder reale Appliance für Live-Tests vorhanden. Steuerung und Ereignisstream bleiben gesperrt bzw. ungeprüft. |
+| [Bosch Smart Camera](./integrations/bosch-smart-camera.md) | `BLOCKED`: für die Bosch Smart Camera App ist keine autorisierte API-Konfiguration belegt. Es wird kein Kamera- oder Medienzugriff versucht. |
+
 ## Geräte aus dem aktuellen Haushalt
 
 | System | Modell | Bekannter Weg | HomeFlow-Status |

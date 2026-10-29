@@ -1,6 +1,7 @@
 import type { DeviceAdapter } from "../adapters/device-adapter.js";
 import type { AdapterRegistry } from "../adapters/adapter-registry.js";
 import type {
+  CapabilitySupportStatus,
   CapabilityValue,
   DeviceCapability,
   DeviceCommand,
@@ -39,6 +40,13 @@ export class CapabilityNotWritableError extends Error {
   }
 }
 
+export class CapabilityUnavailableError extends Error {
+  constructor(capabilityId: string, status: CapabilitySupportStatus) {
+    super(`Capability "${capabilityId}" is not available for actions (status: ${status}).`);
+    this.name = "CapabilityUnavailableError";
+  }
+}
+
 export class InvalidCapabilityValueError extends Error {
   constructor(capabilityId: string, value: CapabilityValue) {
     super(`Value "${String(value)}" is invalid for capability "${capabilityId}".`);
@@ -71,6 +79,9 @@ export class ActionDispatcher {
     );
     if (!capability) {
       throw new UnknownCapabilityError(command.deviceId, command.capabilityId);
+    }
+    if (capability.supportStatus && capability.supportStatus !== "SUPPORTED") {
+      throw new CapabilityUnavailableError(command.capabilityId, capability.supportStatus);
     }
     if (!capability.writable) {
       throw new CapabilityNotWritableError(command.capabilityId);

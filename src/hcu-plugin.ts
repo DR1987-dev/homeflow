@@ -5,6 +5,7 @@ import { InMemoryEventBus } from "./events/event-bus.js";
 import { DeviceRegistry } from "./registry/device-registry.js";
 import { StateStore } from "./state/state-store.js";
 import { AnkerSetup } from "./hcu/anker-setup.js";
+import { HomeConnectSetup } from "./hcu/home-connect-setup.js";
 import type { PluginMessage } from "./hcu/connect-api.js";
 import { HcuBridge } from "./hcu/bridge.js";
 import { HcuConnectClient } from "./hcu/connect-client.js";
@@ -72,6 +73,15 @@ const anker = new AnkerSetup({
   log,
 });
 
+const homeConnect = new HomeConnectSetup({
+  pluginId,
+  dataFile: `${dataDir}/home-connect.json`,
+  devices,
+  adapters,
+  bus,
+  log,
+});
+
 const ANKER_KEYS = ["email", "password", "country"];
 
 /** The HCU shows one configuration page per plugin, so the Anker and the shutter settings are merged here. */
@@ -81,13 +91,19 @@ async function handleConfig(message: PluginMessage): Promise<PluginMessage | und
     const base = (reply?.body ?? {}) as { groups?: object; properties?: object };
     const settingsTemplate = settings.template();
     const extra = selection.template();
+    const homeConnectTemplate = homeConnect.template();
     return {
       id: message.id,
       pluginId,
       type: "CONFIG_TEMPLATE_RESPONSE",
       body: {
-        groups: { ...base.groups, ...settingsTemplate.groups, ...extra.groups },
-        properties: { ...base.properties, ...settingsTemplate.properties, ...extra.properties },
+        groups: { ...base.groups, ...settingsTemplate.groups, ...extra.groups, ...homeConnectTemplate.groups },
+        properties: {
+          ...base.properties,
+          ...settingsTemplate.properties,
+          ...extra.properties,
+          ...homeConnectTemplate.properties,
+        },
       },
     };
   }
@@ -104,6 +120,10 @@ async function handleConfig(message: PluginMessage): Promise<PluginMessage | und
     }
     const count = await selection.update(properties);
     log(`Automation settings updated; ${count} shutter(s)/group(s) selected.`);
+    const homeConnectResult = await homeConnect.update(properties);
+    if (homeConnectResult.status === "FAILED") {
+      return { id: message.id, pluginId, type: "CONFIG_UPDATE_RESPONSE", body: homeConnectResult };
+    }
     const ankerProperties = Object.fromEntries(
       Object.entries(properties).filter(
         ([key, value]) =>
@@ -194,6 +214,7 @@ const bridge = new HcuBridge({
 
 bridge.start();
 await anker.load();
+await homeConnect.load();
 client.start();
 engine.start();
 log(
@@ -204,6 +225,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     engine.stop();
     anker.stop();
+    homeConnect.stop();
     client.stop();
   });
 }
