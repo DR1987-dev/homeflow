@@ -81,6 +81,7 @@ describe("AnkerCloudAdapter", () => {
     const definitions = await adapter().discover();
     expect(definitions.map((definition) => [definition.id, definition.kind])).toEqual([
       ["anker-abc123", "battery"],
+      ["anker-abc123-pv", "inverter"],
       ["anker-m1", "energy-meter"],
     ]);
     const readings = await adapter().readState("anker-m1");
@@ -101,6 +102,13 @@ describe("AnkerCloudAdapter", () => {
       ["battery_level", 50],
       ["output_power_w", 10],
     ]);
+  });
+
+  it("reports the PV power as separate inverter device", async () => {
+    const readings = await adapter().readState("anker-abc123-pv");
+    expect(readings).toEqual([]);
+    const withPv = new AnkerCloudAdapter({ fetchSnapshot: async () => ({ solarbanks: [{ ...banks[0]!, photovoltaicPowerW: 420 }], meters: [] }) });
+    expect((await withPv.readState("anker-abc123-pv")).map((r) => [r.capabilityId, r.value])).toEqual([["power_w", 420]]);
   });
 
   it("refuses control", async () => {
@@ -167,7 +175,7 @@ describe("AnkerSetup", () => {
       msg("CONFIG_UPDATE_REQUEST", { properties: { email: "a@b.de", password: "pw", country: "de" } }),
     );
     expect(applied?.body).toEqual({ status: "APPLIED" });
-    expect(devices.list().map((device) => device.id)).toEqual(["anker-x1"]);
+    expect(devices.list().map((device) => device.id)).toEqual(["anker-x1", "anker-x1-pv"]);
     expect(JSON.parse(await readFile(dataFile, "utf8"))).toMatchObject({ country: "DE" });
     expect((await stat(dataFile)).mode & 0o777).toBe(0o600);
     expect((await setup.handle(msg("PLUGIN_STATE_REQUEST")))?.body).toEqual({ pluginReadinessStatus: "READY" });

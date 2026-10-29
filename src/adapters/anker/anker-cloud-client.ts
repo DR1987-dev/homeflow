@@ -88,7 +88,8 @@ export class AnkerCloudClient {
     const meters: AnkerSmartMeter[] = [];
     for (const siteId of siteIds) {
       const scene = await this.post("power_service/v1/site/get_scen_info", { site_id: siteId });
-      const list = asArray(asRecord(scene.solarbank_info).solarbank_list);
+      const info = asRecord(scene.solarbank_info);
+      const list = asArray(info.solarbank_list);
       for (const raw of list) {
         const item = asRecord(raw);
         const sn = str(item.device_sn);
@@ -102,8 +103,9 @@ export class AnkerCloudClient {
           model: str(item.device_pn) ?? "unknown",
           // Older models report the state of charge as "battery_power" (percent).
           stateOfChargePercent: num(item.battery_soc) ?? num(item.battery_power),
-          photovoltaicPowerW: num(item.photovoltaic_power),
-          outputPowerW: num(item.output_power),
+          photovoltaicPowerW:
+            num(item.photovoltaic_power) ?? (list.length === 1 ? num(info.total_photovoltaic_power) : undefined),
+          outputPowerW: num(item.output_power) ?? (list.length === 1 ? num(info.total_output_power) : undefined),
         });
       }
 

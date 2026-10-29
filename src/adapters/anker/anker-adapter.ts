@@ -52,11 +52,30 @@ export class AnkerCloudAdapter implements DeviceAdapter {
         ...(this.energy ? [kwh("energy_in_kwh", "Eingespeiste Energie"), kwh("energy_out_kwh", "Bezogene Energie")] : []),
       ],
     }));
-    return [...banks, ...meterDefinitions];
+    // The HCU has no PV feature on a battery, so the PV side is its own inverter device.
+    const pvDefinitions: DeviceDefinition[] = solarbanks.map((bank) => ({
+      id: pvDeviceId(bank.sn),
+      adapterId: this.id,
+      manufacturer: "Anker",
+      model: bank.model,
+      name: `${bank.name} PV`,
+      kind: "inverter",
+      capabilities: [
+        { id: "power_w", label: "Solarleistung", type: "number", unit: "W", readable: true, writable: false },
+      ],
+    }));
+    return [...banks, ...pvDefinitions, ...meterDefinitions];
   }
 
   async readState(id: string): Promise<readonly CapabilityReading[]> {
     const { solarbanks, meters } = await this.snapshot(false);
+    const pvBank = solarbanks.find((candidate) => pvDeviceId(candidate.sn) === id);
+    if (pvBank) {
+      const observedAt = new Date(this.cache?.at ?? this.now()).toISOString();
+      return pvBank.photovoltaicPowerW === undefined
+        ? []
+        : [{ capabilityId: "power_w", value: pvBank.photovoltaicPowerW, observedAt }];
+    }
     const bank = solarbanks.find((candidate) => deviceId(candidate.sn) === id);
     const meter = meters.find((candidate) => deviceId(candidate.sn) === id);
     if (!bank && !meter) {
@@ -114,6 +133,10 @@ export class AnkerCloudAdapter implements DeviceAdapter {
     this.cache = { at: this.now(), snapshot };
     return snapshot;
   }
+}
+
+function pvDeviceId(serial: string): string {
+  return `anker-${serial.toLowerCase()}-pv`;
 }
 
 function deviceId(serial: string): string {
