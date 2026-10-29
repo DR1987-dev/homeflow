@@ -85,7 +85,7 @@ describe("HomeConnectSetup", () => {
     await target.idle();
 
     expect(devices.list()).toHaveLength(0);
-    expect(target.template().groups.homeConnect.description).toContain("access_denied");
+    expect((target.template().groups.homeConnect as { description: string }).description).toContain("access_denied");
   });
 
   it("restores the connection from stored tokens on load", async () => {
@@ -106,5 +106,45 @@ describe("HomeConnectSetup", () => {
     await reloaded.load();
     reloaded.stop();
     expect(reloaded.connected).toBe(true);
+  });
+
+  it("keeps control off until requested, then exposes only individually enabled switches", async () => {
+    const api = fakeApi([json({ access_token: "at", refresh_token: "rt", expires_in: 86400 })]);
+    const { target, devices } = await setup(api.fetcher);
+
+    await target.update({ homeConnectClientId: "client-1", homeConnectControl: true });
+    await target.idle();
+    expect(decodeURIComponent(api.bodies[0] ?? "")).toContain("Dishwasher-Control");
+    expect(devices.list().filter((device) => device.id.startsWith("home-connect-ctl:"))).toHaveLength(0);
+    expect(target.allowedControlPairs()).toEqual([]);
+
+    const switchId = "home-connect-ctl:ha-1:power";
+    await target.update({
+      homeConnectClientId: "client-1",
+      homeConnectControl: true,
+      [`hcctl:${switchId}`]: true,
+      "hcctl:home-connect-ctl:ha-1:program": false,
+    });
+    expect(target.allowedControlPairs()).toEqual([{ deviceId: switchId, capabilityId: "on" }]);
+    expect(devices.get(switchId)?.kind).toBe("switch");
+
+    await target.update({ homeConnectClientId: "client-1", homeConnectControl: false });
+    expect(target.allowedControlPairs()).toEqual([]);
+    expect(devices.get(switchId)).toBeUndefined();
+    target.stop();
+  });
+
+  it("does not enable a program switch without a configured program", async () => {
+    const api = fakeApi([json({ access_token: "at", refresh_token: "rt", expires_in: 86400 })]);
+    const { target } = await setup(api.fetcher);
+    await target.update({ homeConnectClientId: "client-1", homeConnectControl: true });
+    await target.idle();
+
+    const programSwitch = "home-connect-ctl:ha-1:program";
+    await target.update({ homeConnectClientId: "client-1", homeConnectControl: true, [`hcctl:${programSwitch}`]: true });
+    expect(target.allowedControlPairs()).toEqual([]);
+    await target.update({ homeConnectClientId: "client-1", homeConnectControl: true, [`hcprog:ha-1`]: "Program.A" });
+    expect(target.allowedControlPairs()).toEqual([{ deviceId: programSwitch, capabilityId: "on" }]);
+    target.stop();
   });
 });

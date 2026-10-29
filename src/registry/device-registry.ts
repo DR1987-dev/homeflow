@@ -61,6 +61,10 @@ export class DeviceRegistry {
     this.devices.set(device.id, device);
   }
 
+  unregister(deviceId: string): void {
+    this.devices.delete(deviceId);
+  }
+
   get(deviceId: string): DeviceDefinition | undefined {
     return this.devices.get(deviceId);
   }

@@ -1,6 +1,10 @@
 const API_BASE_URL = "https://api.home-connect.com/api";
 const TOKEN_URL = "https://api.home-connect.com/security/oauth/token";
 const TOKEN_EXPIRY_SKEW_MS = 60_000;
+const API_MEDIA_TYPE = "application/vnd.bsh.sdk.v1+json";
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** Home Connect allows 1000 requests per client and user per day; stay safely below it. */
+const DEFAULT_DAILY_REQUEST_BUDGET = 900;
 
 export interface HomeConnectTokens {
   accessToken: string;
@@ -15,6 +19,7 @@ export interface HomeConnectClientOptions {
   onTokens?: (tokens: HomeConnectTokens) => void | Promise<void>;
   fetcher?: typeof fetch;
   now?: () => number;
+  dailyRequestBudget?: number;
 }
 
 export class HomeConnectAuthorizationError extends Error {
@@ -31,6 +36,13 @@ export class HomeConnectApiError extends Error {
   ) {
     super(message);
     this.name = "HomeConnectApiError";
+  }
+}
+
+export class HomeConnectRateLimitError extends Error {
+  constructor() {
+    super("Local Home Connect request budget for the last 24 hours is exhausted.");
+    this.name = "HomeConnectRateLimitError";
   }
 }
 
@@ -60,6 +72,7 @@ export class HomeConnectClient {
   private readonly fetcher: typeof fetch;
   private readonly now: () => number;
   private refreshInFlight: Promise<string> | undefined;
+  private requestTimes: number[] = [];
 
   constructor(private readonly options: HomeConnectClientOptions) {
     if (!options.clientId.trim()) {
@@ -110,13 +123,81 @@ export class HomeConnectClient {
     });
   }
 
-  private async request(path: string): Promise<Record<string, unknown>> {
+  async getSetting(
+    haId: string,
+    key: string,
+  ): Promise<{ value: boolean | number | string; allowedValues?: readonly string[] }> {
+    const body = await this.request(`/homeappliances/${encodeURIComponent(haId)}/settings/${key}`);
+    const data = record(body.data);
+    if (typeof data.value !== "boolean" && typeof data.value !== "number" && typeof data.value !== "string") {
+      throw new HomeConnectProtocolError("Home Connect setting has an invalid shape.");
+    }
+    const allowed = record(data.constraints ?? {}).allowedvalues;
+    return {
+      value: data.value,
+      ...(Array.isArray(allowed)
+        ? { allowedValues: allowed.filter((item): item is string => typeof item === "string") }
+        : {}),
+    };
+  }
+
+  async putSetting(haId: string, key: string, value: boolean | number | string): Promise<void> {
+    await this.request(`/homeappliances/${encodeURIComponent(haId)}/settings/${key}`, "PUT", {
+      data: { key, value },
+    });
+  }
+
+  async getAvailableProgramKeys(haId: string): Promise<readonly string[]> {
+    const body = await this.request(`/homeappliances/${encodeURIComponent(haId)}/programs/available`);
+    const programs = record(body.data).programs;
+    if (!Array.isArray(programs)) {
+      throw new HomeConnectProtocolError("Home Connect program list has an invalid shape.");
+    }
+    return programs.flatMap((item) => {
+      const key = record(item).key;
+      return typeof key === "string" ? [key] : [];
+    });
+  }
+
+  /** Returns the key of the active program, or undefined when no program is active. */
+  async getActiveProgramKey(haId: string): Promise<string | undefined> {
+    try {
+      const body = await this.request(`/homeappliances/${encodeURIComponent(haId)}/programs/active`);
+      const key = record(body.data).key;
+      return typeof key === "string" ? key : undefined;
+    } catch (error) {
+      if (error instanceof HomeConnectApiError && error.status === 404) {
+        return undefined;
+      }
+      throw error;
+    }
+  }
+
+  async startProgram(
+    haId: string,
+    key: string,
+    options: readonly { key: string; value: boolean | number | string }[] = [],
+  ): Promise<void> {
+    await this.request(`/homeappliances/${encodeURIComponent(haId)}/programs/active`, "PUT", {
+      data: { key, ...(options.length > 0 ? { options } : {}) },
+    });
+  }
+
+  async stopProgram(haId: string): Promise<void> {
+    await this.request(`/homeappliances/${encodeURIComponent(haId)}/programs/active`, "DELETE");
+  }
+
+  private async request(
+    path: string,
+    method: "GET" | "PUT" | "DELETE" = "GET",
+    payload?: unknown,
+  ): Promise<Record<string, unknown>> {
     let token = await this.accessToken();
-    let response = await this.sendApiRequest(path, token);
+    let response = await this.sendApiRequest(path, token, method, payload);
 
     if (response.status === 401 && this.tokens.refreshToken) {
       token = await this.refreshAccessToken();
-      response = await this.sendApiRequest(path, token);
+      response = await this.sendApiRequest(path, token, method, payload);
     }
 
     if (!response.ok) {
@@ -125,17 +206,38 @@ export class HomeConnectClient {
         response.status,
       );
     }
+    if (response.status === 204) {
+      return {};
+    }
 
     return parseJsonObject(response, "Home Connect API response");
   }
 
-  private async sendApiRequest(path: string, token: string): Promise<Response> {
+  private async sendApiRequest(
+    path: string,
+    token: string,
+    method: string,
+    payload: unknown,
+  ): Promise<Response> {
+    this.consumeBudget();
     return this.fetcher(`${API_BASE_URL}${path}`, {
+      method,
       headers: {
-        Accept: "application/vnd.bsh.sdk.v1+json",
+        Accept: API_MEDIA_TYPE,
         Authorization: `Bearer ${token}`,
+        ...(payload === undefined ? {} : { "Content-Type": API_MEDIA_TYPE }),
       },
+      ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
     });
+  }
+
+  private consumeBudget(): void {
+    const now = this.now();
+    this.requestTimes = this.requestTimes.filter((time) => time > now - DAY_MS);
+    if (this.requestTimes.length >= (this.options.dailyRequestBudget ?? DEFAULT_DAILY_REQUEST_BUDGET)) {
+      throw new HomeConnectRateLimitError();
+    }
+    this.requestTimes.push(now);
   }
 
   private async accessToken(): Promise<string> {

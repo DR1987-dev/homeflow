@@ -50,6 +50,17 @@ jobs:
           tags: de/rybosch/david/homeflow:ci
           build-args: |
             PLUGIN_VERSION=${{ steps.version.outputs.value }}
+      - name: Verify HCU plugin metadata
+        env:
+          PLUGIN_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          metadata="$(docker image inspect de/rybosch/david/homeflow:ci --format '{{ index .Config.Labels "de.eq3.hmip.plugin.metadata" }}')"
+          PLUGIN_METADATA="$metadata" node --input-type=module -e '
+            const metadata = JSON.parse(process.env.PLUGIN_METADATA ?? "");
+            if (metadata.version !== process.env.PLUGIN_VERSION) {
+              throw new Error(`Plugin metadata version "${metadata.version}" does not match "${process.env.PLUGIN_VERSION}"`);
+            }
+          '
       - run: docker save de/rybosch/david/homeflow:ci | gzip > homeflow-hcu-plugin.tar.gz
       - uses: actions/upload-artifact@v4
         with:

@@ -6,7 +6,7 @@
 - Request the minimum needed scopes; never place client secrets or tokens in source control or logs.
 - Persist token refreshes in a protected secret store and restrict access to that store.
 - Treat appliance metadata and each observed status feature as device-specific. A status feature is read-only.
-- All Home Connect actions are blocked in HomeFlow until the implementation verifies the current device state, action prerequisites, freshness, explicit device/program approval, and duplicate-action protection.
+- Home Connect actions are available only through the opt-in control switches described in `docs/integrations/bosch-home-connect.md`: each switch is off by default, individually allow-listed per device and capability, limited to documented settings/programs, gated on `RemoteControlStartAllowed` for program starts, serialized, idempotent, and confirmed by read-back. Oven starts require a bounded duration. Hob control is `UNAVAILABLE`. Everything else stays blocked.
 - Do not infer a supported program, option, or remote-start permission from a product name.
 
 ## Bosch Smart Camera

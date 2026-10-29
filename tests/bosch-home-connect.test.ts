@@ -125,6 +125,36 @@ describe("Home Connect client and adapter", () => {
     });
   });
 
+  it("sends documented write requests and treats 204 and missing active programs correctly", async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(jsonResponse({ error: { key: "SDK.Error.NoProgramActive" } }, 404))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const client = new HomeConnectClient({ ...credentials, fetcher });
+
+    await client.putSetting("ha-1", "Cooking.Common.Setting.Lighting", true);
+    expect(await client.getActiveProgramKey("ha-1")).toBeUndefined();
+    await client.stopProgram("ha-1");
+
+    const [url, init] = fetcher.mock.calls[0] ?? [];
+    expect(String(url)).toContain("/homeappliances/ha-1/settings/Cooking.Common.Setting.Lighting");
+    expect(init?.method).toBe("PUT");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      data: { key: "Cooking.Common.Setting.Lighting", value: true },
+    });
+    expect(fetcher.mock.calls[2]?.[1]?.method).toBe("DELETE");
+  });
+
+  it("stops sending requests once the local daily budget is used up", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => jsonResponse({ data: { homeappliances: [] } }));
+    const client = new HomeConnectClient({ ...credentials, fetcher, dailyRequestBudget: 2 });
+
+    await client.listAppliances();
+    await client.listAppliances();
+    await expect(client.listAppliances()).rejects.toThrow(/budget/);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
   it("requests the media type the Home Connect API accepts", async () => {
     const fetcher = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(jsonResponse({ data: { homeappliances: [] } }));

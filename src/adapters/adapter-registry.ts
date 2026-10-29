@@ -18,6 +18,11 @@ export class AdapterRegistry {
     this.adapters.set(adapter.id, adapter);
   }
 
+  /** Registers the adapter, or swaps an existing one with the same ID (e.g. after re-authorization). */
+  replace(adapter: DeviceAdapter): void {
+    this.adapters.set(adapter.id, adapter);
+  }
+
   get(adapterId: string): DeviceAdapter | undefined {
     return this.adapters.get(adapterId);
   }

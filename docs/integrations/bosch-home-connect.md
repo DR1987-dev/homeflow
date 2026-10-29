@@ -2,7 +2,7 @@
 
 ## Status
 
-The adapter uses the documented Home Connect API and supports dynamic appliance discovery and read-only state polling. It does not start or stop programs, set options, or subscribe to event streams. Those operations remain blocked until HomeFlow has per-appliance capability discovery, remote-control checks, explicit user authorization, deduplication, and post-action verification.
+The adapter uses the documented Home Connect API for dynamic appliance discovery and read-only state polling (`HomeConnectAdapter`). Control is a separate, opt-in layer (`HomeConnectControlAdapter`) that exposes individually enabled on/off switches to the HCU app. Event streaming and any control not listed below remain blocked until verified.
 
 The API is an authorized cloud interface; appliances are not accessed directly. Home Connect supports a changing set of appliance types and features, so HomeFlow does not assume that every Bosch appliance or feature is supported.
 
@@ -32,7 +32,22 @@ Open the verification address printed by the script and enter the displayed user
 
 ### Plugin setup (HCUweb)
 
-On the plugin's HCUweb configuration page, enter the Home Connect **Client ID** (and optionally the **Client Secret**) and save. The plugin starts the Device Flow; reopen the page to see the verification address and user code in the Bosch Home Connect group, approve in the browser, and the appliances are registered read-only. Credentials and tokens are stored in `/data/home-connect.json` (mode 0600) and refreshed automatically; the secret is sent only to the Home Connect token endpoint. Polling runs every 10 minutes to respect API rate limits. Only `IdentifyAppliance` and `<Type>-Monitor` scopes are requested (falls back to `IdentifyAppliance` if the portal rejects them). Appliances appear in HomeFlow's registry, state store and event bus; the HCU does not display them because it has no matching device type. **UNVERIFIED** against a live HCU.
+On the plugin's HCUweb configuration page, enter the Home Connect **Client ID** (and optionally the **Client Secret**) and save. The plugin starts the Device Flow; reopen the page to see the verification address and user code in the Bosch Home Connect group, approve in the browser, and the appliances are registered read-only. Credentials and tokens are stored in `/data/home-connect.json` (mode 0600) and refreshed automatically; the secret is sent only to the Home Connect token endpoint. Polling runs every 30 minutes; the client also enforces a local budget of 900 requests per 24 hours (the documented limit is 1000/day, 5 program starts/min). Only `IdentifyAppliance` and `<Type>-Monitor` scopes are requested (falls back to `IdentifyAppliance` if the portal rejects them). Appliances appear in HomeFlow's registry, state store and event bus; the HCU does not display them because it has no matching device type. **UNVERIFIED** against a live HCU.
+
+### Control from the HCU app
+
+Tick **Steuerung erlauben** on the HCUweb page and approve the new device code (the Control/Settings scopes require a fresh approval; read-only access remains if the portal rejects them). The page then lists one checkbox per possible switch; **every switch is off by default** and only ticked switches are registered as HCU `SWITCH` devices and allowed through the safety policy:
+
+| Appliance | Switches |
+| --- | --- |
+| Dishwasher, Coffee maker | Power (`BSH.Common.Setting.PowerState` On/Standby), Program start/stop |
+| Hood | Power, Light (`Cooking.Common.Setting.Lighting`), Fan (program `Cooking.Common.Program.Hood.Venting` at stage 1-5, stop = abort) |
+| Washer, Dryer | Program start/stop |
+| Oven | Program start/stop; a duration of 1-60 minutes is mandatory and sent as `BSH.Common.Option.Duration` |
+
+Program switches start exactly the program key entered on the page (e.g. `Dishcare.Dishwasher.Program.Eco50`) and stay unavailable until a key is set. Before every start the plugin checks `BSH.Common.Status.RemoteControlStartAllowed` (Remote Start must be enabled at the appliance) and that the key appears in `programs/available`. Each command is serialized per appliance, skipped when the appliance already has the requested state, and confirmed by a read-back; an unconfirmed change is reported as an error. Disabling a switch removes it from the registry and the allow-list. Already included HCU devices then fail with an unknown-device error.
+
+Not verified against a live appliance: the oven program/option combination required by a specific model (the API may reject a start without e.g. a setpoint temperature), the program keys of your models, and how the HCU app presents the switches. Use the HCU app's switch state only as the last confirmed value; Home Connect state is refreshed every 30 minutes and after each command.
 
 ## Implemented capabilities
 
@@ -43,7 +58,8 @@ On the plugin's HCUweb configuration page, enter the Home Connect **Client ID** 
 
 ## Not yet implemented
 
-- Program selection/start/stop, options, remote-control state validation, and confirmation after actions: **BLOCKED**.
+- Arbitrary program options, scheduled starts, and Home Connect event streaming: **BLOCKED / UNVERIFIED**.
+- Hob heating start: **UNAVAILABLE**. The Home Connect documentation lists no hob program or setting that starts heating, so no hob control is offered and no `Hob-*` control scope is requested.
 - Home Connect event streaming and event deduplication: **UNVERIFIED** in this adapter.
 - Live account/device access: **UNVERIFIED**; no credentials or real appliance were available for verification.
 - Device support is limited to the appliances, scopes, status fields, and values actually returned by the authorized API.

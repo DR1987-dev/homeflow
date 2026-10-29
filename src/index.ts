@@ -2,6 +2,7 @@ export * from "./actions/action-dispatcher.js";
 export * from "./adapters/adapter-registry.js";
 export * from "./adapters/bosch/home-connect-adapter.js";
 export * from "./adapters/bosch/home-connect-client.js";
+export * from "./adapters/bosch/home-connect-control.js";
 export * from "./adapters/bosch/home-connect-device-flow.js";
 export * from "./adapters/bosch/smart-camera-adapter.js";
 export * from "./adapters/device-adapter.js";
