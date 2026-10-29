@@ -9,9 +9,12 @@ RUN npm run build
 
 FROM --platform=linux/arm64 ghcr.io/homematicip/alpine-node-simple:0.0.1
 WORKDIR /app
+ARG PLUGIN_VERSION
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
 ENTRYPOINT ["node", "dist/hcu-plugin.js"]
 
-LABEL de.eq3.hmip.plugin.metadata='{"pluginId":"de.rybosch.david.homeflow","issuer":"David Rybosch","version":"0.1.0","hcuMinVersion":"1.4.7","scope":"LOCAL","friendlyName":{"en":"HomeFlow","de":"HomeFlow"},"description":{"en":"Modular smart home, energy and automation platform.","de":"Modulare Smart-Home-, Energie- und Automatisierungsplattform."},"logsEnabled":true}'
+RUN test -n "$PLUGIN_VERSION"
+
+LABEL de.eq3.hmip.plugin.metadata='{"pluginId":"de.rybosch.david.homeflow","issuer":"David Rybosch","version":"${PLUGIN_VERSION}","hcuMinVersion":"1.4.7","scope":"LOCAL","friendlyName":{"en":"HomeFlow","de":"HomeFlow"},"description":{"en":"Modular smart home, energy and automation platform.","de":"Modulare Smart-Home-, Energie- und Automatisierungsplattform."},"logsEnabled":true}'

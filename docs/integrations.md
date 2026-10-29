@@ -29,9 +29,14 @@ Stand der Recherche: 28.10.2026. „Nicht nachgewiesen“ bedeutet, dass HomeFlo
 ## HCU1-Plugin: Voraussetzungen und Installation
 
 1. In HCUweb den **Entwicklermodus** aktivieren. Laut Connect-API-Dokumentation kann er nach dem Anlegen eines Connect-API-Clients **nicht mehr deaktiviert** werden. Eigene Plugins lassen sich nur bei aktivem Entwicklermodus installieren.
-2. Image bauen: `docker build --platform linux/arm64 -f Dockerfile.hcu -t de/rybosch/david/homeflow:0.1.0 .`
-3. Exportieren: `docker save de/rybosch/david/homeflow:0.1.0 | gzip > homeflow-hcu-plugin.tar.gz` (alternativ als Artefakt aus dem CI-Job `hcu-plugin`).
-4. Archiv in HCUweb auf der Plugin-Seite hochladen.
+2. Image bauen und exportieren:
+   ```sh
+   VERSION="$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")"
+   docker build --platform linux/arm64 -f Dockerfile.hcu --build-arg PLUGIN_VERSION="$VERSION" -t "de/rybosch/david/homeflow:$VERSION" .
+   docker save "de/rybosch/david/homeflow:$VERSION" | gzip > homeflow-hcu-plugin.tar.gz
+   ```
+   Die Plugin-Metadaten erhalten die Version aus `PLUGIN_VERSION`. CI verwendet bei `v*`-Tags die Tag-Version ohne `v`, sonst die Version aus `package.json`.
+3. Archiv in HCUweb auf der Plugin-Seite hochladen (alternativ das Artefakt aus dem CI-Job `hcu-plugin` verwenden).
 
 Die HCU stellt dem Container `/TOKEN`, `/CLIENTID`, `/SGTIN` und das persistente Verzeichnis `/data` bereit und erreicht sich unter `wss://host.containers.internal:9001`. Für Entwicklung ohne Installation kann das Plugin remote laufen (`HCU_HOST=hcu1-XXXX.local`, `HCU_TOKEN_FILE=<Datei>`), wenn der WebSocket in HCUweb freigegeben ist. Die Plugin-ID ist über `HCU_PLUGIN_ID` änderbar, muss dann aber auch im Label in `Dockerfile.hcu` angepasst werden.
 

@@ -28,6 +28,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - id: version
+        name: Determine plugin version
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")"
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
@@ -39,6 +48,8 @@ jobs:
           platforms: linux/arm64
           load: true
           tags: de/rybosch/david/homeflow:ci
+          build-args: |
+            PLUGIN_VERSION=${{ steps.version.outputs.value }}
       - run: docker save de/rybosch/david/homeflow:ci | gzip > homeflow-hcu-plugin.tar.gz
       - uses: actions/upload-artifact@v4
         with:
