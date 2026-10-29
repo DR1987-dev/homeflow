@@ -67,9 +67,9 @@ export function closeTime(
 
 export function validateShutterConfig(config: ShutterSunsetConfig): void {
   const problems: string[] = [];
-  if (!config.sensorDeviceId) problems.push("sensorDeviceId is missing");
   if (!(config.darkLux < config.brightLux)) problems.push("darkLux must be below brightLux");
   if (config.earlyMinutes < 0 || config.lateMinutes < 0) problems.push("early/lateMinutes must be >= 0");
+  if (!(config.baseOffsetMinutes >= -180 && config.baseOffsetMinutes <= 180)) problems.push("baseOffsetMinutes must be within ±180");
   if (!(config.smoothingMinutes > 0)) problems.push("smoothingMinutes must be positive");
   if (!(config.closedLevel > 0 && config.closedLevel <= 1)) problems.push("closedLevel must be in (0, 1]");
   if (problems.length > 0) {
@@ -85,15 +85,17 @@ export function validateShutterConfig(config: ShutterSunsetConfig): void {
 export function createShutterSunsetRule(
   config: ShutterSunsetConfig,
   getShutterIds: () => readonly string[] = () => config.shutterDeviceIds,
+  getSensorId: () => string | undefined = () => config.sensorDeviceId,
 ): Rule & {
   currentLux(now: Date): number | undefined;
+  plannedCloseTime(context: Pick<RuleContext, "now" | "location">): Date | undefined;
 } {
   validateShutterConfig(config);
   const samples: { at: number; lux: number }[] = [];
-  const windowMs = config.smoothingMinutes * 60_000;
+  const windowMs = () => config.smoothingMinutes * 60_000;
 
   const currentLux = (now: Date): number | undefined => {
-    const cutoff = now.getTime() - windowMs;
+    const cutoff = now.getTime() - windowMs();
     const recent = samples.filter((sample) => sample.at >= cutoff);
     if (recent.length === 0) {
       return undefined;
@@ -101,34 +103,38 @@ export function createShutterSunsetRule(
     return recent.reduce((sum, sample) => sum + sample.lux, 0) / recent.length;
   };
 
+  const plannedCloseTime = ({ now, location }: Pick<RuleContext, "now" | "location">): Date | undefined => {
+    if (!location) {
+      return undefined;
+    }
+    const sunsetTime = sunset(localDate(now, location.timeZone), location.latitude, location.longitude);
+    if (!sunsetTime) {
+      return undefined;
+    }
+    const newest = samples[samples.length - 1];
+    const fresh = newest !== undefined && now.getTime() - newest.at <= config.maxSensorAgeMinutes * 60_000;
+    return closeTime(sunsetTime, fresh ? currentLux(now) : undefined, config);
+  };
+
   return {
     id: "shutter-sunset",
     oncePerDay: true,
     currentLux,
+    plannedCloseTime,
     observe({ now, state }: RuleContext) {
-      const reading = state.get(config.sensorDeviceId).get(ILLUMINANCE);
-      if (typeof reading === "number" && Number.isFinite(reading) && state.isAvailable(config.sensorDeviceId)) {
+      const sensorId = getSensorId();
+      const reading = sensorId ? state.get(sensorId).get(ILLUMINANCE) : undefined;
+      if (sensorId && typeof reading === "number" && Number.isFinite(reading) && state.isAvailable(sensorId)) {
         samples.push({ at: now.getTime(), lux: reading });
       }
-      const cutoff = now.getTime() - Math.max(windowMs, config.maxSensorAgeMinutes * 60_000);
+      const cutoff = now.getTime() - Math.max(windowMs(), config.maxSensorAgeMinutes * 60_000);
       while (samples.length > 0 && samples[0]!.at < cutoff) {
         samples.shift();
       }
     },
     evaluate({ now, state, location }: RuleContext): readonly DeviceCommand[] | undefined {
-      if (!location) {
-        return undefined;
-      }
-      const day = localDate(now, location.timeZone);
-      const sunsetTime = sunset(day, location.latitude, location.longitude);
-      if (!sunsetTime) {
-        return undefined;
-      }
-
-      const newest = samples[samples.length - 1];
-      const fresh = newest !== undefined && now.getTime() - newest.at <= config.maxSensorAgeMinutes * 60_000;
-      const target = closeTime(sunsetTime, fresh ? currentLux(now) : undefined, config);
-      if (now < target) {
+      const target = plannedCloseTime({ now, location });
+      if (!target || now < target) {
         return undefined;
       }
       return getShutterIds()

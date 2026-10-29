@@ -8,16 +8,17 @@ import { AnkerSetup } from "./hcu/anker-setup.js";
 import type { PluginMessage } from "./hcu/connect-api.js";
 import { HcuBridge } from "./hcu/bridge.js";
 import { HcuConnectClient } from "./hcu/connect-client.js";
+import { dateKey, localDate } from "./astro/sun.js";
 import { HCU_SYSTEM_ADAPTER_ID, HcuSystem } from "./hcu/system.js";
-import { isPropertyOfSelection, ShutterSelection } from "./automation/selection.js";
+import { ShutterSelection } from "./automation/selection.js";
 import { AutomationEngine } from "./automation/engine.js";
 import {
   createShutterSunsetRule,
   DEFAULT_SHUTTER_CONFIG,
-  ILLUMINANCE,
   SHUTTER_LEVEL,
   type ShutterSunsetConfig,
 } from "./automation/shutter-sunset.js";
+import { SettingsError, ShutterSettings, type StatusSource } from "./automation/settings.js";
 import { AutomationSwitch } from "./automation/switch.js";
 import { AllowListSafetyPolicy, FileRunStore } from "./automation/support.js";
 
@@ -27,37 +28,34 @@ const tokenFile = process.env.HCU_TOKEN_FILE ?? "/TOKEN";
 const dataDir = process.env.HCU_DATA_DIR ?? "/data";
 const log = (line: string) => console.log(line);
 
-// Without an explicit automation config, no command may reach a device.
-const denyAll: ActionSafetyPolicy = {
-  authorize() {
-    throw new Error("No safety policy is configured; control is disabled.");
-  },
-};
-
-async function loadShutterConfig(): Promise<ShutterSunsetConfig | undefined> {
+/** Optional initial values; everything can be changed later on the HCUweb configuration page. */
+async function loadInitialConfig(): Promise<ShutterSunsetConfig> {
+  const base: ShutterSunsetConfig = {
+    ...DEFAULT_SHUTTER_CONFIG,
+    enabled: true,
+    shutterDeviceIds: [],
+    sensorDeviceId: "",
+  };
   try {
     const raw = JSON.parse(await readFile(`${dataDir}/shutter-sunset.json`, "utf8"));
-    const config = { ...DEFAULT_SHUTTER_CONFIG, enabled: false, ...raw } as ShutterSunsetConfig;
-    return config.enabled ? config : undefined;
+    return { ...base, ...raw };
   } catch {
-    return undefined;
+    return base;
   }
 }
 
-const shutterConfig = await loadShutterConfig();
+const shutterConfig = await loadInitialConfig();
 const SWITCH_ID = "automation:shutter-sunset";
 const selection = new ShutterSelection({
   file: `${dataDir}/shutter-selection.json`,
-  initial: shutterConfig?.shutterDeviceIds ?? [],
+  initial: shutterConfig.shutterDeviceIds,
   candidates: () => devices.list().filter((device) => device.adapterId === HCU_SYSTEM_ADAPTER_ID),
 });
 await selection.load();
-const safetyPolicy: ActionSafetyPolicy = shutterConfig
-  ? new AllowListSafetyPolicy(() => [
-      ...selection.ids.map((deviceId) => ({ deviceId, capabilityId: SHUTTER_LEVEL })),
-      { deviceId: SWITCH_ID, capabilityId: "on" },
-    ])
-  : denyAll;
+const safetyPolicy: ActionSafetyPolicy = new AllowListSafetyPolicy(() => [
+  ...selection.ids.map((deviceId) => ({ deviceId, capabilityId: SHUTTER_LEVEL })),
+  { deviceId: SWITCH_ID, capabilityId: "on" },
+]);
 
 const bus = new InMemoryEventBus();
 const state = new StateStore(bus);
@@ -78,30 +76,38 @@ const ANKER_KEYS = ["email", "password", "country"];
 
 /** The HCU shows one configuration page per plugin, so the Anker and the shutter settings are merged here. */
 async function handleConfig(message: PluginMessage): Promise<PluginMessage | undefined> {
-  if (!shutterConfig) return undefined;
   if (message.type === "CONFIG_TEMPLATE_REQUEST") {
     const reply = await anker.handle(message);
     const base = (reply?.body ?? {}) as { groups?: object; properties?: object };
+    const settingsTemplate = settings.template();
     const extra = selection.template();
     return {
       id: message.id,
       pluginId,
       type: "CONFIG_TEMPLATE_RESPONSE",
       body: {
-        groups: { ...base.groups, ...extra.groups },
-        properties: { ...base.properties, ...extra.properties },
+        groups: { ...base.groups, ...settingsTemplate.groups, ...extra.groups },
+        properties: { ...base.properties, ...settingsTemplate.properties, ...extra.properties },
       },
     };
   }
   if (message.type === "CONFIG_UPDATE_REQUEST") {
     const body = (message.body ?? {}) as { properties?: Record<string, unknown> };
     const properties = body.properties ?? {};
+    try {
+      await settings.update(properties);
+    } catch (error) {
+      if (error instanceof SettingsError) {
+        return { id: message.id, pluginId, type: "CONFIG_UPDATE_RESPONSE", body: { status: "FAILED", message: error.message } };
+      }
+      throw error;
+    }
     const count = await selection.update(properties);
-    log(`Shutter selection updated: ${count} device(s)/group(s).`);
+    log(`Automation settings updated; ${count} shutter(s)/group(s) selected.`);
     const ankerProperties = Object.fromEntries(
       Object.entries(properties).filter(
         ([key, value]) =>
-          !isPropertyOfSelection(key) && ANKER_KEYS.includes(key) && typeof value === "string" && value.trim() !== "",
+          ANKER_KEYS.includes(key) && typeof value === "string" && value.trim() !== "",
       ),
     );
     if (Object.keys(ankerProperties).length === 0) {
@@ -123,23 +129,37 @@ const system = new HcuSystem({
 
 const runStore = new FileRunStore(`${dataDir}/automation-state.json`);
 await runStore.load();
-const automationSwitch = shutterConfig
-  ? new AutomationSwitch({
-      deviceId: SWITCH_ID,
-      name: "Rollladen-Automatik",
-      file: `${dataDir}/automation-switches.json`,
-      defaultOn: true,
-      devices,
-      adapters,
-      bus,
-    })
-  : undefined;
-await automationSwitch?.load();
-const rule = shutterConfig
-  ? { ...createShutterSunsetRule(shutterConfig, () => selection.ids), isEnabled: () => automationSwitch?.enabled ?? false }
-  : undefined;
+const automationSwitch = new AutomationSwitch({
+  deviceId: SWITCH_ID,
+  name: "Rollladen-Automatik",
+  file: `${dataDir}/automation-switches.json`,
+  defaultOn: true,
+  devices,
+  adapters,
+  bus,
+});
+await automationSwitch.load();
+
+const settings = new ShutterSettings({
+  file: `${dataDir}/shutter-settings.json`,
+  config: shutterConfig,
+  candidates: () => devices.list().filter((device) => device.adapterId === HCU_SYSTEM_ADAPTER_ID),
+  isEnabled: () => automationSwitch.enabled,
+  doneToday: (now) =>
+    runStore.get("shutter-sunset") === dateKey(localDate(now, system.location?.timeZone ?? "UTC")),
+  setEnabled: (enabled) =>
+    automationSwitch.execute({ deviceId: SWITCH_ID, capabilityId: "on", value: enabled }),
+  status: (): StatusSource => rule,
+  location: () => system.location,
+});
+await settings.load();
+
+const rule = {
+  ...createShutterSunsetRule(shutterConfig, () => selection.ids, (): string | undefined => settings.sensorId()),
+  isEnabled: () => automationSwitch.enabled,
+};
 const engine = new AutomationEngine({
-  rules: rule ? [rule] : [],
+  rules: [rule],
   state,
   dispatcher,
   runStore,
@@ -175,12 +195,10 @@ const bridge = new HcuBridge({
 bridge.start();
 await anker.load();
 client.start();
-if (rule) {
-  engine.start();
-  log(`Shutter automation active for ${selection.ids.join(", ") || "no shutters selected yet"} (sensor ${ILLUMINANCE} of ${shutterConfig!.sensorDeviceId}).`);
-} else {
-  log("Shutter automation inactive: /data/shutter-sunset.json missing or not enabled.");
-}
+engine.start();
+log(
+  `Shutter automation ${automationSwitch.enabled ? "on" : "off"}; ${selection.ids.length} shutter(s)/group(s) selected, sensor ${settings.sensorId() ?? "not chosen"}.`,
+);
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {

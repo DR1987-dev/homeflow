@@ -105,6 +105,28 @@ describe("HcuSystem", () => {
     await executing;
   });
 
+  it("logs numeric fields of a weather channel with an unknown brightness field once", async () => {
+    const logs: string[] = [];
+    const sent: PluginMessage[] = [];
+    const system = new HcuSystem({
+      pluginId: "p",
+      send: (m) => void sent.push(m),
+      bus: new InMemoryEventBus(),
+      devices: new DeviceRegistry(),
+      adapters: new AdapterRegistry(),
+      log: (line) => void logs.push(line),
+    });
+    const device = {
+      id: "W",
+      functionalChannels: { "1": { index: 1, functionalChannelType: "WEATHER_SENSOR_PRO_CHANNEL", lightLevel: 7, windSpeed: 3 } },
+    };
+    const event = { id: "e", pluginId: "p", type: "HMIP_SYSTEM_EVENT", body: { eventTransaction: { events: { "0": { pushEventType: "DEVICE_CHANGED", device } } } } };
+    await system.handle(event);
+    await system.handle(event);
+    expect(logs.filter((l) => l.includes("no known brightness field"))).toHaveLength(1);
+    expect(logs.join("\n")).toContain("lightLevel=7");
+  });
+
   it("rejects when the HCU answers with an error", async () => {
     const { system, respond } = setup();
     const loading = system.load();

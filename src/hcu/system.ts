@@ -50,7 +50,21 @@ interface Extracted {
   readings: Record<string, number>;
 }
 
-function extract(device: Json): Extracted[] {
+const warned = new Set<string>();
+
+/** A weather sensor channel without a known lux field is logged once with its numeric keys, to find the real field name. */
+function logUnmatchedBrightness(channel: Json, deviceId: string, log?: (line: string) => void): void {
+  const type = String(channel.functionalChannelType ?? "");
+  const key = `${deviceId}:${channel.index}`;
+  if (!log || warned.has(key) || !/WEATHER|LIGHT|ILLUM|BRIGHT/i.test(type)) return;
+  warned.add(key);
+  const numeric = Object.entries(channel)
+    .filter(([, value]) => typeof value === "number")
+    .map(([name, value]) => `${name}=${String(value)}`);
+  log(`HCU channel ${key} (${type}) has no known brightness field; numeric fields: ${numeric.join(", ")}`);
+}
+
+function extract(device: Json, log?: (line: string) => void): Extracted[] {
   const id = device.id;
   const channels = device.functionalChannels;
   if (typeof id !== "string" || !isRecord(channels)) {
@@ -67,7 +81,10 @@ function extract(device: Json): Extracted[] {
 
     const lux = illuminationOf(channel);
     const level = finite(channel.shutterLevel);
-    if (lux === undefined && level === undefined) continue;
+    if (lux === undefined && level === undefined) {
+      logUnmatchedBrightness(channel, id, log);
+      continue;
+    }
 
     const readings: Record<string, number> = {};
     const capabilities: DeviceDefinition["capabilities"][number][] = [];
@@ -317,7 +334,7 @@ export class HcuSystem implements DeviceAdapter {
 
   private async applyDevice(device: Json): Promise<void> {
     const observedAt = new Date().toISOString();
-    for (const { definition, ref, readings } of extract(device)) {
+    for (const { definition, ref, readings } of extract(device, this.options.log)) {
       if (!this.options.devices.get(definition.id)) {
         this.options.devices.register(definition);
         this.options.log?.(`HCU device found: ${definition.id} "${definition.name}" (${definition.model})`);
