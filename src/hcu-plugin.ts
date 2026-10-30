@@ -6,6 +6,8 @@ import { DeviceRegistry } from "./registry/device-registry.js";
 import { StateStore } from "./state/state-store.js";
 import { AnkerSetup } from "./hcu/anker-setup.js";
 import { HomeConnectSetup } from "./hcu/home-connect-setup.js";
+import { AlarmShortcutSettings } from "./hcu/alarm-shortcut-settings.js";
+import { AlarmShortcutWebhook } from "./hcu/alarm-shortcut-webhook.js";
 import type { PluginMessage } from "./hcu/connect-api.js";
 import { HcuBridge } from "./hcu/bridge.js";
 import { HcuConnectClient } from "./hcu/connect-client.js";
@@ -27,6 +29,10 @@ const pluginId = process.env.HCU_PLUGIN_ID ?? "de.rybosch.david.homeflow";
 const host = process.env.HCU_HOST ?? "host.containers.internal";
 const tokenFile = process.env.HCU_TOKEN_FILE ?? "/TOKEN";
 const dataDir = process.env.HCU_DATA_DIR ?? "/data";
+const alarmPort = Number(process.env.HOMEFLOW_ALARM_PORT ?? "8787");
+if (!Number.isInteger(alarmPort) || alarmPort < 1024 || alarmPort > 65535) {
+  throw new Error("HOMEFLOW_ALARM_PORT must be an integer from 1024 to 65535.");
+}
 const log = (line: string) => console.log(line);
 
 /** Optional initial values; everything can be changed later on the HCUweb configuration page. */
@@ -83,6 +89,16 @@ const homeConnect = new HomeConnectSetup({
   log,
 });
 
+const alarmSettings = new AlarmShortcutSettings(`${dataDir}/alarm-shortcut.json`, alarmPort);
+const alarmWebhook = new AlarmShortcutWebhook({
+  port: alarmPort,
+  eventFile: `${dataDir}/alarm-shortcut-events.json`,
+  token: () => alarmSettings.token,
+  target: () => homeConnect.alarmCoffeePowerCommand(),
+  dispatch: (command) => dispatcher.dispatch(command),
+  log,
+});
+
 const ANKER_KEYS = ["email", "password", "country"];
 
 /** The HCU shows one configuration page per plugin, so the Anker and the shutter settings are merged here. */
@@ -93,17 +109,25 @@ async function handleConfig(message: PluginMessage): Promise<PluginMessage | und
     const settingsTemplate = settings.template();
     const extra = selection.template();
     const homeConnectTemplate = homeConnect.template();
+    const alarmTemplate = alarmSettings.template();
     return {
       id: message.id,
       pluginId,
       type: "CONFIG_TEMPLATE_RESPONSE",
       body: {
-        groups: { ...base.groups, ...settingsTemplate.groups, ...extra.groups, ...homeConnectTemplate.groups },
+        groups: {
+          ...base.groups,
+          ...settingsTemplate.groups,
+          ...extra.groups,
+          ...homeConnectTemplate.groups,
+          ...alarmTemplate.groups,
+        },
         properties: {
           ...base.properties,
           ...settingsTemplate.properties,
           ...extra.properties,
           ...homeConnectTemplate.properties,
+          ...alarmTemplate.properties,
         },
       },
     };
@@ -124,6 +148,22 @@ async function handleConfig(message: PluginMessage): Promise<PluginMessage | und
     const homeConnectResult = await homeConnect.update(properties);
     if (homeConnectResult.status === "FAILED") {
       return { id: message.id, pluginId, type: "CONFIG_UPDATE_RESPONSE", body: homeConnectResult };
+    }
+    const alarmResult = await alarmSettings.update(properties);
+    if (alarmResult.status === "FAILED") {
+      return { id: message.id, pluginId, type: "CONFIG_UPDATE_RESPONSE", body: alarmResult };
+    }
+    try {
+      await alarmWebhook.refresh();
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error);
+      log(`Alarm shortcut endpoint could not start: ${text}`);
+      return {
+        id: message.id,
+        pluginId,
+        type: "CONFIG_UPDATE_RESPONSE",
+        body: { status: "FAILED", message: `Wecker-Endpunkt konnte nicht gestartet werden: ${text}` },
+      };
     }
     const ankerProperties = Object.fromEntries(
       Object.entries(properties).filter(
@@ -216,6 +256,13 @@ const bridge = new HcuBridge({
 bridge.start();
 await anker.load();
 await homeConnect.load();
+await alarmSettings.load();
+await alarmWebhook.load();
+try {
+  await alarmWebhook.refresh();
+} catch (error) {
+  log(`Alarm shortcut endpoint could not start: ${error instanceof Error ? error.message : String(error)}`);
+}
 client.start();
 engine.start();
 log(
@@ -227,6 +274,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     engine.stop();
     anker.stop();
     homeConnect.stop();
+    void alarmWebhook.stop();
     client.stop();
   });
 }

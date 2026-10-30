@@ -39,6 +39,7 @@ describe("Home Connect appliances in the HCU app", () => {
             homeappliances: [
               { haId: "ha-1", name: "Dishi", type: "Dishwasher", connected: true },
               { haId: "ha-2", name: "Kochfeld", type: "Hob", connected: true },
+              { haId: "ha-3", name: "Kaffeemaschine", type: "CoffeeMaker", connected: true },
             ],
           },
         });
@@ -110,6 +111,23 @@ describe("Home Connect appliances in the HCU app", () => {
     expect((await control(hcuDeviceId(switchId)))?.body).toMatchObject({ success: true });
     expect(writes).toEqual([{ data: { key: "BSH.Common.Setting.PowerState", value: POWER_ON } }]);
     expect(state.get(switchId).get("on")).toBe(true);
+
+    await setup.update({
+      homeConnectClientId: "c",
+      homeConnectControl: true,
+      "hcctl:home-connect-ctl:ha-3:power": true,
+    });
+    expect(setup.alarmCoffeePowerCommand()).toEqual({
+      deviceId: "home-connect-ctl:ha-3:power",
+      capabilityId: "on",
+      value: true,
+    });
+    await setup.update({
+      homeConnectClientId: "c",
+      homeConnectControl: true,
+      "hcctl:home-connect-ctl:ha-3:power": false,
+    });
+    expect(setup.alarmCoffeePowerCommand()).toBeUndefined();
     setup.stop();
   });
 });

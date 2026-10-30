@@ -1,5 +1,6 @@
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import type { DeviceCommand } from "../domain/device.js";
 import { HomeConnectAdapter } from "../adapters/bosch/home-connect-adapter.js";
 import {
   CONTROL_DEVICE_PREFIX,
@@ -82,6 +83,15 @@ export class HomeConnectSetup {
   /** The control switches currently allowed to receive commands (all others are rejected). */
   allowedControlPairs(): readonly { deviceId: string; capabilityId: string }[] {
     return this.enabledSpecs.map((spec) => ({ deviceId: spec.deviceId, capabilityId: "on" }));
+  }
+
+  alarmCoffeePowerCommand(): DeviceCommand | undefined {
+    if (!this.controlActive()) return undefined;
+    const coffeeSwitches = this.enabledSpecs.filter(
+      (spec) => spec.applianceType === "CoffeeMaker" && spec.kind === "power",
+    );
+    if (coffeeSwitches.length !== 1) return undefined;
+    return { deviceId: coffeeSwitches[0]!.deviceId, capabilityId: "on", value: true };
   }
 
   async load(): Promise<void> {
