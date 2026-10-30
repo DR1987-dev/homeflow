@@ -1,5 +1,5 @@
 # Homematic IP HCU1 plugin image (ARM64). Build with PLUGIN_VERSION and a matching image tag.
-FROM --platform=linux/arm64 node:22-alpine AS build
+FROM --platform=$BUILDPLATFORM node:22-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
