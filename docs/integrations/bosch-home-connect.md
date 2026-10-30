@@ -45,6 +45,8 @@ Tick **Steuerung erlauben** on the HCUweb page and approve the new device code (
 | Washer, Dryer | Program start/stop |
 | Oven | Program start/stop; a duration of 1-60 minutes is mandatory and sent as `BSH.Common.Option.Duration` |
 
+The HCU asks a plugin for its devices (`DISCOVER_REQUEST`) and includes them (`INCLUSION_EVENT`) when the plugin starts; the logs of a running plugin show no further discovery after a configuration change. After enabling or disabling switches, restart the plugin in HCUweb (stop/start) so the HCU and the app pick up the changed device list. This restart requirement is derived from the plugin logs, not from HCU documentation.
+
 Program switches start exactly the program key entered on the page (e.g. `Dishcare.Dishwasher.Program.Eco50`) and stay unavailable until a key is set. Before every start the plugin checks `BSH.Common.Status.RemoteControlStartAllowed` (Remote Start must be enabled at the appliance) and that the key appears in `programs/available`. Each command is serialized per appliance, skipped when the appliance already has the requested state, and confirmed by a read-back; an unconfirmed change is reported as an error. Disabling a switch removes it from the registry and the allow-list. Already included HCU devices then fail with an unknown-device error.
 
 Not verified against a live appliance: the oven program/option combination required by a specific model (the API may reject a start without e.g. a setpoint temperature), the program keys of your models, and how the HCU app presents the switches. Use the HCU app's switch state only as the last confirmed value; Home Connect state is refreshed every 30 minutes and after each command.

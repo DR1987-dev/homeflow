@@ -444,7 +444,9 @@ export class HomeConnectSetup {
     }
     this.controlPoller = this.poller(adapter);
     this.controlPoller.start();
-    this.options.log?.(`Home Connect: ${this.enabledSpecs.length} Steuer-Schalter aktiv.`);
+    this.options.log?.(
+      `Home Connect: ${this.enabledSpecs.length} Steuer-Schalter aktiv. Plugin neu starten, damit die HCU die neuen Geräte erkennt.`,
+    );
   }
 
   private poller(adapter: HomeConnectAdapter | HomeConnectControlAdapter): AdapterPoller {
