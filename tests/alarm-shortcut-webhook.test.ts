@@ -7,7 +7,7 @@ import type { DeviceCommand } from "../src/domain/device.js";
 
 const TOKEN = "0123456789abcdef0123456789abcdef";
 const COMMAND: DeviceCommand = { deviceId: "home-connect-ctl:coffee:power", capabilityId: "on", value: true };
-const EVENT_ID = "c9d847ab-1685-4879-9b39-b37e602ea271";
+const EVENT_ID = "20261030-174625-58392017";
 
 describe("AlarmShortcutWebhook", () => {
   const active: AlarmShortcutWebhook[] = [];
@@ -77,7 +77,7 @@ describe("AlarmShortcutWebhook", () => {
     const { url } = await start({ dispatch });
 
     expect((await send(url, EVENT_ID, "wrong-token")).status).toBe(401);
-    expect((await send(url, "not-a-uuid")).status).toBe(400);
+    expect((await send(url, "")).status).toBe(400);
     expect(dispatch).not.toHaveBeenCalled();
 
     const noTarget = await start({ target: null });

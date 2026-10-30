@@ -5,7 +5,7 @@ import { dirname } from "node:path";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import type { DeviceCommand } from "../domain/device.js";
 
-const EVENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const MAX_EVENT_ID_LENGTH = 128;
 const MAX_BODY_BYTES = 1024;
 const MAX_RECENT_EVENTS = 2048;
 const MAX_REQUESTS_PER_MINUTE = 10;
@@ -51,7 +51,7 @@ export class AlarmShortcutWebhook {
     } catch {
       throw new Error("The stored alarm shortcut event cache is invalid.");
     }
-    if (!Array.isArray(value) || value.some((id) => typeof id !== "string" || !EVENT_ID.test(id))) {
+    if (!Array.isArray(value) || value.some((id) => !isEventId(id))) {
       throw new Error("The stored alarm shortcut event cache is invalid.");
     }
     for (const id of value.slice(-MAX_RECENT_EVENTS)) this.eventIds.add(id);
@@ -195,12 +195,20 @@ async function readEventId(request: IncomingMessage): Promise<string> {
     Array.isArray(value) ||
     Object.keys(value).length !== 1 ||
     !("eventId" in value) ||
-    typeof value.eventId !== "string" ||
-    !EVENT_ID.test(value.eventId)
+    !isEventId(value.eventId)
   ) {
     sendRequestError(400, "invalid_event_id");
   }
-  return (value as { eventId: string }).eventId;
+  return value.eventId as string;
+}
+
+function isEventId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= MAX_EVENT_ID_LENGTH &&
+    !/[\u0000-\u001f\u007f]/.test(value)
+  );
 }
 
 class RequestError extends Error {
