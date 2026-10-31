@@ -85,15 +85,6 @@ export class HomeConnectSetup {
     return this.enabledSpecs.map((spec) => ({ deviceId: spec.deviceId, capabilityId: "on" }));
   }
 
-  alarmCoffeePowerCommand(): DeviceCommand | undefined {
-    if (!this.controlActive()) return undefined;
-    const coffeeSwitches = this.enabledSpecs.filter(
-      (spec) => spec.applianceType === "CoffeeMaker" && spec.kind === "power",
-    );
-    if (coffeeSwitches.length !== 1) return undefined;
-    return { deviceId: coffeeSwitches[0]!.deviceId, capabilityId: "on", value: true };
-  }
-
   async load(): Promise<void> {
     try {
       this.stored = JSON.parse(await readFile(this.options.dataFile, "utf8")) as StoredHomeConnect;
