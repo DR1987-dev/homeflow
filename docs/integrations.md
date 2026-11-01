@@ -14,7 +14,7 @@ Stand der Recherche: 28.10.2026. „Nicht nachgewiesen“ bedeutet, dass HomeFlo
 | System | Modell | Bekannter Weg | HomeFlow-Status |
 |---|---|---|---|
 | Anker SOLIX | Solarbank 3 | Die offizielle Home Assistant Integration arbeitet lokal über Modbus TCP, dokumentiert aber nur eine konkrete Liste aktiver Modelle. Solarbank 3 ist dort nicht gelistet. | Noch kein unterstützter Adapter. Modell-/Firmware-spezifische Modbus-Unterstützung muss vor einer Implementierung nachgewiesen werden. Nicht auf eine inoffizielle Cloud-API ausweichen, ohne dies ausdrücklich zu entscheiden. |
-| Buderus | GB125-18 mit RC35 | Die recherchierte Community-Integration „Buderus MX300/MX400“ nutzt eine inoffizielle MyBuderus/PointT-Cloud-API für Systeme mit MX300/MX400/K30. Sie belegt keine Unterstützung für GB125-18/RC35. | Kein kompatibler Weg für das genannte Modell nachgewiesen. Vor Adapterentwicklung Heizungsbus, vorhandenes Gateway und verfügbaren Datenumfang feststellen. |
+| Buderus | GB125-18 mit RC35 | Bestellt: BBQKees Gateway E32 v2 mit EMS-ESP. Die lokale EMS-ESP-REST-API bietet lesende `GET /api/{device}/values`-Endpunkte für erkannte EMS-Geräte. | Adapter und HCUweb-Konfiguration sind vorbereitet (`src/adapters/buderus/`, `src/hcu/buderus-setup.ts`). Nur lesend, ohne MQTT-Broker. Die tatsächliche Erkennung des GB125-18/RC35 und die gelieferten Felder sind erst nach Installation am Gerät verifizierbar. |
 | Homematic IP | HCU1 | Offizielle **Connect API 1.0.1** (eQ-3, Apache-2.0): Plugins laufen als ARM64-Container auf der HCU1 oder remote im LAN und sprechen per WebSocket (Port 9001) mit der HCU. Plugins können Fremdgeräte einbinden, HCU-Geräte steuern und Systemereignisse empfangen. | Plugin-Gerüst vorhanden (`src/hcu/`, `Dockerfile.hcu`): Verbindung, Authentifizierung und `PLUGIN_STATE`-Handshake. Gerätesynchronisation, Steuerung und Systemereignisse sind noch nicht implementiert. Nicht auf realer HCU1 getestet. |
 
 ## Konsequenzen für die Architektur
@@ -22,7 +22,7 @@ Stand der Recherche: 28.10.2026. „Nicht nachgewiesen“ bedeutet, dass HomeFlo
 - Adapter sprechen ausschließlich das herstellerneutrale HomeFlow-Geräte- und Fähigkeitsmodell an.
 - Nicht erreichbare oder nicht unterstützte Fähigkeiten werden nicht registriert; Aktionen werden nicht stillschweigend simuliert.
 - Die Action Dispatcher-Grenze verlangt eine explizite Safety-/Berechtigungsrichtlinie und prüft zusätzlich Fähigkeit, Datentyp und deklarierte Grenzen.
-- Anker-Modbus, Buderus-Zugriff und HCU1-Anbindung sind eigenständige Adapterentscheidungen.
+- Anker-Modbus, Buderus-Zugriff und HCU1-Anbindung sind eigenständige Adapterentscheidungen. Die EMS-ESP-Anbindung nutzt HTTP lokal im LAN und setzt keinen MQTT-Broker voraus.
 - Der Betrieb als HCU1-Plugin ist ein optionaler Deployment-Modus. Der Kern bleibt hostunabhängig (Docker auf Pi/Mini-PC/NAS) und setzt keine Laufzeit auf HCU1 oder FRITZ!Box voraus. Ressourcen der HCU1 (CPU/RAM, USB-Speicher) sind nicht dokumentiert und müssen vor produktivem Einsatz gemessen werden.
 - Die FRITZ!Box bietet keine Docker-Unterstützung und scheidet als Laufzeit aus.
 
@@ -46,6 +46,9 @@ Offen: Das Basis-Image `ghcr.io/homematicip/alpine-node-simple:0.0.1` stammt aus
 
 - [Anker SOLIX Official Home Assistant Integration](https://github.com/anker-charging/ha-anker-solix-official) – lokale Modbus-TCP-Verbindung und Modell-/Firmwareliste.
 - [Buderus MX300/MX400 Home Assistant Integration](https://github.com/BassXT/buderus) – experimentelle PointT-Cloud-Integration; nennt MX300/MX400/K30 als getestete Gateways und dokumentiert Einschränkungen.
+- [EMS-ESP Commands / HTTP API](https://emsesp.org/Commands) – EMS-ESP-Geräte- und Entitäts-API, Lese-Endpunkte und Tokenverhalten.
+- [EMS-ESP unterstützte Geräte](https://emsesp.org/All-Entities) – unterstützte EMS-Geräte und Entitäten.
+- [BBQKees EMS Gateway Dokumentation](https://bbqkees-electronics.nl/wiki/) – Gateway-Hardware und Produktdokumentation.
 - [Homematic IP Connect API](https://github.com/homematicip/connect-api) – offizielle Plugin-API der HCU (Dokumentation 1.0.1: Containerisierung, WebSocket, Nachrichten).
 - [Homematic IP Home Control Unit](https://homematic-ip.com/en/product/home-control-unit) – beschreibt Online-/Offline-Modus und EEBUS-Funktionalität.
 - [Home Assistant HomematicIP Cloud](https://www.home-assistant.io/integrations/homematicip_cloud/) – beschreibt den Zugriff auf den Cloud-Server per nicht offiziell dokumentierter, reverse-engineerter API und Access-Point-Konfiguration.
@@ -58,7 +61,14 @@ Offen: Das Basis-Image `ghcr.io/homematicip/alpine-node-simple:0.0.1` stammt aus
 - Standard-Capability-IDs: `battery_level` (%, wird zu 0..1), `battery_capacity_wh`, `power_w`, `energy_in_kwh`, `energy_out_kwh`, `target_temperature_c`, `operation_mode`, `on`.
 - `CONTROL_REQUEST` läuft über den `ActionDispatcher` und damit durch die Safety-Policy. Im Plugin ist aktuell eine Deny-all-Policy aktiv: Steuerung ist gesperrt, bis ein Safety-Modul existiert.
 - Der Inklusionsstatus liegt nur im Speicher (nicht persistent).
-- Die Geräteliste ist leer, solange keine Adapter (Anker, Buderus) existieren.
+- Die Anker- und EMS-ESP-Geräte werden erst nach erfolgreicher Konfiguration der jeweiligen Integration angeboten.
+
+## Buderus über BBQKees EMS-ESP (vorbereitet, nur lesend)
+
+- Adapter: `src/adapters/buderus/ems-esp-adapter.ts`; der Client fragt lokal `GET /api/boiler/values` und `GET /api/thermostat/values` ab. Nicht vorhandene Endpunkte (HTTP 404) werden übersprungen.
+- In HCUweb unter Plugin-Konfiguration `Buderus / EMS-ESP` die Gateway-Adresse eintragen, z. B. `http://192.168.178.x`. Ein API-Token ist optional und wird nur benötigt, wenn der Gateway-API-Zugriff geschützt ist. Der Wert wird in `/data/buderus.json` mit Dateirechten `600` gespeichert.
+- Gelesene primitive Werte werden dynamisch als Fähigkeiten registriert. Ein erkannter Thermostat-Sollwert (z. B. EMS-ESP `seltemp`) wird als `target_temperature_c` an die HCU gemappt. Der Kessel erhält derzeit keine HCU-Geräteklasse, da die Connect-API hier kein verifiziertes Boiler-Archetyp-Mapping hat; seine Werte werden im HomeFlow-Gerätemodell gehalten, aber nicht als HCU-Gerät angeboten.
+- Polling alle 30 Sekunden. Keine Schreibzugriffe; `execute()` weist Befehle ausdrücklich zurück. Die reale Erkennung, Modellnamen und Messwerte für GB125-18/RC35 müssen nach Anschluss des Gateways verifiziert werden.
 
 ## Anker Solarbank (Cloud, nur lesend)
 

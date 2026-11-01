@@ -5,6 +5,7 @@ import { InMemoryEventBus } from "./events/event-bus.js";
 import { DeviceRegistry } from "./registry/device-registry.js";
 import { StateStore } from "./state/state-store.js";
 import { AnkerSetup } from "./hcu/anker-setup.js";
+import { BuderusSetup } from "./hcu/buderus-setup.js";
 import { HomeConnectSetup } from "./hcu/home-connect-setup.js";
 import type { PluginMessage } from "./hcu/connect-api.js";
 import { HcuBridge } from "./hcu/bridge.js";
@@ -83,6 +84,14 @@ const homeConnect = new HomeConnectSetup({
   log,
 });
 
+const buderus = new BuderusSetup({
+  dataFile: `${dataDir}/buderus.json`,
+  devices,
+  adapters,
+  bus,
+  log,
+});
+
 const ANKER_KEYS = ["email", "password", "country"];
 
 /** The HCU shows one configuration page per plugin, so the Anker and the shutter settings are merged here. */
@@ -93,6 +102,7 @@ async function handleConfig(message: PluginMessage): Promise<PluginMessage | und
     const settingsTemplate = settings.template();
     const extra = selection.template();
     const homeConnectTemplate = homeConnect.template();
+    const buderusTemplate = buderus.template();
     return {
       id: message.id,
       pluginId,
@@ -103,12 +113,14 @@ async function handleConfig(message: PluginMessage): Promise<PluginMessage | und
           ...settingsTemplate.groups,
           ...extra.groups,
           ...homeConnectTemplate.groups,
+          ...buderusTemplate.groups,
         },
         properties: {
           ...base.properties,
           ...settingsTemplate.properties,
           ...extra.properties,
           ...homeConnectTemplate.properties,
+          ...buderusTemplate.properties,
         },
       },
     };
@@ -129,6 +141,10 @@ async function handleConfig(message: PluginMessage): Promise<PluginMessage | und
     const homeConnectResult = await homeConnect.update(properties);
     if (homeConnectResult.status === "FAILED") {
       return { id: message.id, pluginId, type: "CONFIG_UPDATE_RESPONSE", body: homeConnectResult };
+    }
+    const buderusResult = await buderus.update(properties);
+    if (buderusResult.status === "FAILED") {
+      return { id: message.id, pluginId, type: "CONFIG_UPDATE_RESPONSE", body: buderusResult };
     }
     const ankerProperties = Object.fromEntries(
       Object.entries(properties).filter(
@@ -221,6 +237,7 @@ const bridge = new HcuBridge({
 bridge.start();
 await anker.load();
 await homeConnect.load();
+await buderus.load();
 client.start();
 engine.start();
 log(
@@ -232,6 +249,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     engine.stop();
     anker.stop();
     homeConnect.stop();
+    buderus.stop();
     client.stop();
   });
 }
