@@ -44,16 +44,16 @@ describe("ShutterSettings", () => {
     expect(properties[ENABLED_KEY].currentValue).toBe("true");
     expect(properties["setting:baseOffsetMinutes"]).toMatchObject({ dataType: "INTEGER", currentValue: "15" });
     expect(properties[SENSOR_KEY].values).toEqual(["Wetterstation [hcu:S:1]"]);
-    expect(properties["status:close"].currentValue).toMatch(/^\d{2}:\d{2} Uhr$/);
+    expect(properties["status:close"].currentValue).toMatch(/^frühestens \d{2}:\d{2}, spätestens \d{2}:\d{2} Uhr, sobald die Helligkeit unter 40 lx fällt$/);
     expect(properties["status:lux"].currentValue).toBe("kein aktueller Messwert");
   });
 
   it("shows tomorrow's time once today's closing is done", async () => {
     const { settings, setDone } = await setup();
     const text = () => (settings.template() as { properties: Record<string, any> }).properties["status:close"].currentValue as string;
-    expect(text()).toMatch(/^\d{2}:\d{2} Uhr$/);
+    expect(text()).toMatch(/^frühestens/);
     setDone(true);
-    expect(text()).toMatch(/^heute erledigt; morgen ca\. \d{2}:\d{2} Uhr/);
+    expect(text()).toMatch(/^heute erledigt; morgen frühestens/);
   });
 
   it("requires an explicit choice with several sensors", async () => {
@@ -63,13 +63,14 @@ describe("ShutterSettings", () => {
 
   it("applies, persists and reloads settings; the rule sees them immediately", async () => {
     const { settings, config, file, isEnabled, rule } = await setup();
-    const before = rule.plannedCloseTime({ now: new Date("2026-06-21T12:00:00Z"), location })!;
-    await settings.update({ "setting:baseOffsetMinutes": 30, "setting:lateMinutes": "45", [ENABLED_KEY]: false });
+    const noon = new Date("2026-06-21T12:00:00Z");
+    const before = rule.closeWindowFor({ now: noon, location })!;
+    await settings.update({ "setting:baseOffsetMinutes": 30, "setting:lateMinutes": "60", [ENABLED_KEY]: false });
     expect(config.baseOffsetMinutes).toBe(30);
-    expect(config.lateMinutes).toBe(45);
+    expect(config.lateMinutes).toBe(60);
     expect(isEnabled()).toBe(false);
-    const after = rule.plannedCloseTime({ now: new Date("2026-06-21T12:00:00Z"), location })!;
-    expect(after.getTime() - before.getTime()).toBe(15 * 60_000);
+    const after = rule.closeWindowFor({ now: noon, location })!;
+    expect(after.latest.getTime() - before.latest.getTime()).toBe(15 * 60_000);
     expect(JSON.parse(await readFile(file, "utf8")).baseOffsetMinutes).toBe(30);
 
     const fresh = await setup();
@@ -86,7 +87,7 @@ describe("ShutterSettings", () => {
   it("rejects invalid input without changing anything", async () => {
     const { settings, config, file } = await setup();
     await expect(settings.update({ "setting:baseOffsetMinutes": 999 })).rejects.toBeInstanceOf(SettingsError);
-    await expect(settings.update({ "setting:darkLux": 2000, "setting:brightLux": 500 })).rejects.toThrow(/kleiner/);
+    await expect(settings.update({ "setting:darkLux": -5 })).rejects.toBeInstanceOf(SettingsError);
     await expect(settings.update({ [SENSOR_KEY]: "Fremd [x]" })).rejects.toThrow(/sensor/i);
     expect(config.baseOffsetMinutes).toBe(15);
     await expect(readFile(file, "utf8")).rejects.toThrow();

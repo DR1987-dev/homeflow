@@ -2,14 +2,13 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { DeviceDefinition } from "../domain/device.js";
 import type { GeoLocation } from "./engine.js";
-import { ILLUMINANCE, validateShutterConfig, type ShutterSunsetConfig } from "./shutter-sunset.js";
+import { ILLUMINANCE, validateShutterConfig, type CloseWindow, type ShutterSunsetConfig } from "./shutter-sunset.js";
 
 const NUMERIC = {
-  baseOffsetMinutes: { label: "Minuten nach Sonnenuntergang (Basis)", min: -180, max: 180 },
-  earlyMinutes: { label: "Max. Minuten früher bei Dunkelheit/Bewölkung", min: 0, max: 240 },
-  lateMinutes: { label: "Max. Minuten später bei Helligkeit", min: 0, max: 240 },
-  darkLux: { label: "Dunkel ab (Lux, darunter maximal früher)", min: 0, max: 100000 },
-  brightLux: { label: "Hell ab (Lux, darüber maximal später)", min: 1, max: 200000 },
+  earlyMinutes: { label: "Frühestens Minuten vor Sonnenuntergang", min: 0, max: 240 },
+  lateMinutes: { label: "Spätestens Minuten nach Sonnenuntergang", min: 0, max: 240 },
+  darkLux: { label: "Schließen, sobald Helligkeit unter (Lux)", min: 0, max: 5000 },
+  baseOffsetMinutes: { label: "Ohne Sensor: Minuten nach Sonnenuntergang", min: -180, max: 180 },
   smoothingMinutes: { label: "Helligkeit mitteln über (Minuten)", min: 1, max: 120 },
 } as const;
 
@@ -23,7 +22,7 @@ export const isSettingKey = (key: string) => key.startsWith(SETTING_PREFIX);
 
 export interface StatusSource {
   currentLux(now: Date): number | undefined;
-  plannedCloseTime(context: { now: Date; location: GeoLocation | undefined }): Date | undefined;
+  closeWindowFor(context: { now: Date; location: GeoLocation | undefined }): CloseWindow | undefined;
 }
 
 export class SettingsError extends Error {}
@@ -86,12 +85,15 @@ export class ShutterSettings {
         ? new Intl.DateTimeFormat("de-DE", { timeZone: location?.timeZone ?? "UTC", hour: "2-digit", minute: "2-digit" }).format(date)
         : undefined;
     const done = this.options.doneToday(now);
-    const planned = format(status?.plannedCloseTime({ now: done ? new Date(now.getTime() + 86_400_000) : now, location }));
-    const time = !planned
+    const window = status?.closeWindowFor({ now: done ? new Date(now.getTime() + 86_400_000) : now, location });
+    const range = window
+      ? `frühestens ${format(window.earliest)}, spätestens ${format(window.latest)} Uhr, sobald die Helligkeit unter ${Math.round(config.darkLux)} lx fällt`
+      : undefined;
+    const time = !range
       ? "unbekannt (Standort fehlt oder keine Dämmerung)"
       : done
-        ? `heute erledigt; morgen ca. ${planned} Uhr (ohne Helligkeitsverschiebung)`
-        : `${planned} Uhr`;
+        ? `heute erledigt; morgen ${range}`
+        : range;
 
     const sensors = this.sensors();
     const current = sensors.find((d) => d.id === this.sensorId());
@@ -105,7 +107,7 @@ export class ShutterSettings {
       },
       "status:close": {
         dataType: "READONLY",
-        friendlyName: "Geplante Schließzeit",
+        friendlyName: "Schließfenster",
         groupId: "automation",
         order: 2,
         currentValue: time,
@@ -146,7 +148,7 @@ export class ShutterSettings {
         automation: {
           friendlyName: "Rollladen-Automatik: Einstellungen",
           description:
-            "Schließzeit = Sonnenuntergang + Basis, verschoben nach Helligkeit: bei Dunkelheit bis zu „früher“ Minuten eher, bei Helligkeit bis zu „später“ Minuten später.",
+            "Die Rollläden schließen im Zeitfenster [Sonnenuntergang − früher, Sonnenuntergang + später], sobald es draußen dunkler als der Lux-Wert ist, spätestens am Fensterende. Dadurch gilt es in jeder Jahreszeit; bei Regen oder Bewölkung wird der Wert früher erreicht.",
           order: 1,
         },
       },
@@ -166,9 +168,6 @@ export class ShutterSettings {
         throw new SettingsError(`„${spec.label}“ muss zwischen ${spec.min} und ${spec.max} liegen.`);
       }
       next[key] = Math.round(value);
-    }
-    if (!(next.darkLux < next.brightLux)) {
-      throw new SettingsError("„Dunkel ab“ muss kleiner als „Hell ab“ sein.");
     }
 
     const sensorRaw = properties[SENSOR_KEY];

@@ -5,8 +5,8 @@ import type { DeviceAdapter } from "../src/adapters/device-adapter.js";
 import { sunset } from "../src/astro/sun.js";
 import { AutomationEngine, InMemoryRunStore, type GeoLocation } from "../src/automation/engine.js";
 import {
-  brightnessOffsetMinutes,
-  closeTime,
+  closeWindow,
+  isCloseDue,
   createShutterSunsetRule,
   DEFAULT_SHUTTER_CONFIG,
   ILLUMINANCE,
@@ -30,18 +30,24 @@ const day = { year: 2026, month: 6, day: 21 };
 const sunsetTime = sunset(day, location.latitude, location.longitude)!;
 const at = (minutesFromSunset: number) => new Date(sunsetTime.getTime() + minutesFromSunset * 60_000);
 
-describe("brightness offset", () => {
-  it("shifts earlier when dark, later when bright, interpolates between", () => {
-    expect(brightnessOffsetMinutes(20, config)).toBe(-60);
-    expect(brightnessOffsetMinutes(50_000, config)).toBe(30);
-    expect(brightnessOffsetMinutes(550, config)).toBe(-15);
-    expect(brightnessOffsetMinutes(undefined, config)).toBe(0);
+describe("close window", () => {
+  it("spans sunset - early to sunset + late, fallback clamped into it", () => {
+    const w = closeWindow(sunsetTime, config);
+    expect([w.earliest, w.latest, w.fallback]).toEqual([at(-60), at(45), at(15)]);
+    expect(closeWindow(sunsetTime, { ...config, baseOffsetMinutes: 200 }).fallback).toEqual(at(45));
+    expect(closeWindow(sunsetTime, { ...config, baseOffsetMinutes: -200 }).fallback).toEqual(at(-60));
   });
 
-  it("combines with the base offset", () => {
-    expect(closeTime(sunsetTime, 20, config)).toEqual(at(-45));
-    expect(closeTime(sunsetTime, 5000, config)).toEqual(at(45));
-    expect(closeTime(sunsetTime, undefined, config)).toEqual(at(15));
+  it("closes on darkness inside the window, never before it, at the end at the latest", () => {
+    const w = closeWindow(sunsetTime, config);
+    expect(isCloseDue(at(-61), w, 5, config)).toBe(false);
+    expect(isCloseDue(at(-30), w, 5, config)).toBe(true);
+    expect(isCloseDue(at(10), w, 219, config)).toBe(false);
+    expect(isCloseDue(at(10), w, 40, config)).toBe(true);
+    expect(isCloseDue(at(44), w, 5000, config)).toBe(false);
+    expect(isCloseDue(at(45), w, 5000, config)).toBe(true);
+    expect(isCloseDue(at(14), w, undefined, config)).toBe(false);
+    expect(isCloseDue(at(15), w, undefined, config)).toBe(true);
   });
 });
 
@@ -93,19 +99,31 @@ function setup() {
 describe("shutter sunset automation", () => {
   it("closes early on a dark, overcast evening", async () => {
     const { engine, executed, setLux, setNow } = setup();
-    await setLux(50);
-    setNow(at(-50));
+    await setLux(20);
+    setNow(at(-61));
     await engine.tick();
     expect(executed).toEqual([]);
-    setNow(at(-45));
+    setNow(at(-55));
     await engine.tick();
     expect(executed).toEqual([{ deviceId: "shutter", capabilityId: SHUTTER_LEVEL, value: 1 }]);
   });
 
-  it("waits longer on a bright summer evening", async () => {
+  it("waits while it is still bright (219 lx at sunset) and closes once it gets dark", async () => {
+    const { engine, executed, setLux, setNow } = setup();
+    await setLux(219);
+    setNow(at(3));
+    await engine.tick();
+    expect(executed).toEqual([]);
+    await setLux(35);
+    setNow(at(25));
+    await engine.tick();
+    expect(executed).toHaveLength(1);
+  });
+
+  it("closes at the latest at the end of the window even when it stays bright", async () => {
     const { engine, executed, setLux, setNow } = setup();
     await setLux(20_000);
-    setNow(at(30));
+    setNow(at(44));
     await engine.tick();
     expect(executed).toEqual([]);
     setNow(at(45));
