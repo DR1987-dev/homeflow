@@ -21,6 +21,7 @@ export type DeviceKind =
   | "energy-meter"
   | "grid-connection-point"
   | "heat-pump"
+  | "climate-sensor"
   | "thermostat"
   | "switch";
 

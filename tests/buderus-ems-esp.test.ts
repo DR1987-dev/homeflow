@@ -7,6 +7,7 @@ import { EmsEspApiError, EmsEspClient, normalizeGatewayUrl } from "../src/adapte
 import { AdapterRegistry } from "../src/adapters/adapter-registry.js";
 import { InMemoryEventBus } from "../src/events/event-bus.js";
 import { BuderusSetup } from "../src/hcu/buderus-setup.js";
+import { toHcuDevice } from "../src/hcu/device-mapper.js";
 import { DeviceRegistry } from "../src/registry/device-registry.js";
 
 const json = (body: unknown, status = 200) =>
@@ -157,6 +158,54 @@ describe("EmsEspAdapter", () => {
   it("requires at least one reachable EMS device", async () => {
     const client = new EmsEspClient("http://ems-esp.local", undefined, async () => json({}, 404));
     await expect(new EmsEspAdapter(client).discover()).rejects.toThrow("weder einen Heizkessel noch einen Thermostat");
+  });
+
+  it("maps actual temperatures and the MM10 flow without exposing the pump as a switch", async () => {
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/boiler/values")) return json({ outdoortemp: 8.9, boiltemp: 68.2, dhw: { curtemp: 58.2 } });
+      if (url.endsWith("/thermostat/values")) return json({ hc2: { seltemp: 21.5, currtemp: 21.8 } });
+      if (url.endsWith("/mixer/values")) return json({ hc2: { flowtemphc: 40.9, flowsettemp: 40, pumpstatus: "on" } });
+      return json({}, 404);
+    });
+    const adapter = new EmsEspAdapter(new EmsEspClient("http://ems-esp.local", undefined, fetcher));
+    const devices = await adapter.discover();
+    const thermostat = devices.find((device) => device.id === "emsesp:thermostat");
+    const sensor = devices.find((device) => device.id === "emsesp:sensor:hc2-flow");
+    expect(thermostat?.capabilities).toContainEqual(expect.objectContaining({ id: "actual_temperature_c", writable: false }));
+    expect(await adapter.readState("emsesp:thermostat")).toEqual(expect.arrayContaining([
+      expect.objectContaining({ capabilityId: "actual_temperature_c", value: 21.8 }),
+    ]));
+    expect(sensor).toBeDefined();
+    expect(devices.filter((device) => device.kind === "climate-sensor").map((device) => device.name)).toEqual([
+      "Buderus Außentemperatur", "Buderus Warmwasser Ist", "Buderus Heizkreis 2 Vorlauf Ist",
+    ]);
+    expect(devices.some((device) => device.kind === "switch")).toBe(false);
+    const readings = await adapter.readState(sensor!.id);
+    const mapped = toHcuDevice(sensor!, new Map(readings.map((reading) => [reading.capabilityId, reading.value])), true);
+    expect(mapped).toMatchObject({
+      ok: true,
+      device: { deviceType: "CLIMATE_SENSOR", features: [{ type: "actualTemperature", actualTemperature: 40.9 }, { type: "maintenance", unreach: false }] },
+    });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it("marks missing or out-of-range temperatures unavailable rather than sending invalid values", async () => {
+    let now = 0;
+    let temperature: number | null = 58;
+    const fetcher = vi.fn(async (input: string | URL | Request) =>
+      String(input).endsWith("/boiler/values")
+        ? json({ dhw: { curtemp: temperature } })
+        : json({}, 404),
+    );
+    const adapter = new EmsEspAdapter(new EmsEspClient("http://ems-esp.local", undefined, fetcher), false, () => now);
+    await adapter.discover();
+    temperature = 61;
+    now += 10_000;
+    await expect(adapter.readState("emsesp:sensor:hot-water")).rejects.toThrow("außerhalb des HCU-Bereichs");
+    temperature = null;
+    now += 10_000;
+    await expect(adapter.readState("emsesp:sensor:hot-water")).rejects.toThrow("fehlt");
   });
 });
 

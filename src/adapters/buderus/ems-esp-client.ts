@@ -1,7 +1,7 @@
 export type EmsEspValue = boolean | number | string;
 
 export interface EmsEspDeviceData {
-  device: "boiler" | "thermostat";
+  device: "boiler" | "thermostat" | "mixer";
   values: Readonly<Record<string, EmsEspValue>>;
 }
 

@@ -103,6 +103,42 @@ describe("hcuDeviceId", () => {
 });
 
 describe("HcuBridge", () => {
+  it("sends a read-only climate sensor temperature to the HCU after inclusion", async () => {
+    const bus = new InMemoryEventBus();
+    const sent: PluginMessage[] = [];
+    const sensor: DeviceDefinition = {
+      id: "flow-sensor",
+      adapterId: "test",
+      manufacturer: "Test",
+      model: "Temperature sensor",
+      name: "Vorlauf Ist",
+      kind: "climate-sensor",
+      capabilities: [{ id: "actual_temperature_c", label: "Temperatur", type: "number", readable: true, writable: false }],
+    };
+    const devices = new DeviceRegistry();
+    devices.register(sensor);
+    const state = new StateStore(bus);
+    const adapters = new AdapterRegistry();
+    const sensorBridge = new HcuBridge({
+      pluginId: "p", devices, state, bus, send: (msg) => sent.push(msg),
+      dispatcher: new ActionDispatcher(devices, adapters, { authorize: () => undefined }),
+    });
+    sensorBridge.start();
+    const discovered = await sensorBridge.handle(message("DISCOVER_REQUEST"));
+    expect(discovered?.body).toMatchObject({
+      devices: [{ deviceId: hcuDeviceId(sensor.id), deviceType: "CLIMATE_SENSOR" }],
+    });
+    await sensorBridge.handle(message("INCLUSION_EVENT", { deviceIds: [hcuDeviceId(sensor.id)] }));
+    await bus.publish({
+      type: "device.state.changed", deviceId: sensor.id, capabilityId: "actual_temperature_c",
+      value: 40.9, observedAt: "2026-01-01T00:00:00.000Z",
+    });
+    expect(sent).toContainEqual(expect.objectContaining({
+      type: "STATUS_EVENT",
+      body: { deviceId: hcuDeviceId(sensor.id), features: [{ type: "actualTemperature", actualTemperature: 40.9 }] },
+    }));
+  });
+
   it("offers only mappable devices on discovery", async () => {
     const { bridge } = setup();
 

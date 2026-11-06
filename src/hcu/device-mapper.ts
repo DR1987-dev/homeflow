@@ -40,6 +40,7 @@ const FEATURES: readonly FeatureSpec[] = [
     ],
   },
   { type: "currentPower", fields: [{ field: "currentPower", capabilityId: "power_w" }] },
+  { type: "actualTemperature", fields: [{ field: "actualTemperature", capabilityId: "actual_temperature_c" }] },
   {
     type: "energyCounter",
     fields: [
@@ -71,6 +72,7 @@ const ARCHETYPES: Record<DeviceKind, { deviceType: string; required: string }> =
   "energy-meter": { deviceType: "ENERGY_METER", required: "currentPower" },
   "grid-connection-point": { deviceType: "GRID_CONNECTION_POINT", required: "currentPower" },
   "heat-pump": { deviceType: "HEAT_PUMP", required: "climateOperationMode" },
+  "climate-sensor": { deviceType: "CLIMATE_SENSOR", required: "actualTemperature" },
   thermostat: { deviceType: "THERMOSTAT", required: "setPointTemperature" },
   switch: { deviceType: "SWITCH", required: "switchState" },
 };
