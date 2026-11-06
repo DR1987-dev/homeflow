@@ -58,6 +58,7 @@ const safetyPolicy: ActionSafetyPolicy = new AllowListSafetyPolicy(() => [
   ...selection.ids.map((deviceId) => ({ deviceId, capabilityId: SHUTTER_LEVEL })),
   { deviceId: SWITCH_ID, capabilityId: "on" },
   ...homeConnect.allowedControlPairs(),
+  ...buderus.allowedControlPairs(),
 ]);
 
 const bus = new InMemoryEventBus();

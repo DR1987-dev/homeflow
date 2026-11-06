@@ -14,7 +14,7 @@ Stand der Recherche: 28.10.2026. „Nicht nachgewiesen“ bedeutet, dass HomeFlo
 | System | Modell | Bekannter Weg | HomeFlow-Status |
 |---|---|---|---|
 | Anker SOLIX | Solarbank 3 | Die offizielle Home Assistant Integration arbeitet lokal über Modbus TCP, dokumentiert aber nur eine konkrete Liste aktiver Modelle. Solarbank 3 ist dort nicht gelistet. | Noch kein unterstützter Adapter. Modell-/Firmware-spezifische Modbus-Unterstützung muss vor einer Implementierung nachgewiesen werden. Nicht auf eine inoffizielle Cloud-API ausweichen, ohne dies ausdrücklich zu entscheiden. |
-| Buderus | GB125-18 mit RC35 | Bestellt: BBQKees Gateway E32 v2 mit EMS-ESP. Die lokale EMS-ESP-REST-API bietet lesende `GET /api/{device}/values`-Endpunkte für erkannte EMS-Geräte. | Adapter und HCUweb-Konfiguration sind vorbereitet (`src/adapters/buderus/`, `src/hcu/buderus-setup.ts`). Nur lesend, ohne MQTT-Broker. Die tatsächliche Erkennung des GB125-18/RC35 und die gelieferten Felder sind erst nach Installation am Gerät verifizierbar. |
+| Buderus | Kessel + RC35 | EMS-ESP meldet Gateway E32V2.2, Firmware 3.8.6, Bus `connected`/`Buderus`, Kesselkennung `Logano GB1*5, Logamatic MC10` und Thermostat `RC35` (Produkt-ID 86, Version 01.06). Die konkrete Kesselkennung ist EMS-ESP-Ausgabe und keine abschließende Identifikation des Typenschilds. | Monitoring implementiert; optional ist ausschließlich RC35-Solltemperatur Heizkreis 2 steuerbar. |
 | Homematic IP | HCU1 | Offizielle **Connect API 1.0.1** (eQ-3, Apache-2.0): Plugins laufen als ARM64-Container auf der HCU1 oder remote im LAN und sprechen per WebSocket (Port 9001) mit der HCU. Plugins können Fremdgeräte einbinden, HCU-Geräte steuern und Systemereignisse empfangen. | Plugin-Gerüst vorhanden (`src/hcu/`, `Dockerfile.hcu`): Verbindung, Authentifizierung und `PLUGIN_STATE`-Handshake. Gerätesynchronisation, Steuerung und Systemereignisse sind noch nicht implementiert. Nicht auf realer HCU1 getestet. |
 
 ## Konsequenzen für die Architektur
@@ -59,16 +59,18 @@ Offen: Das Basis-Image `ghcr.io/homematicip/alpine-node-simple:0.0.1` stammt aus
 
 - Ein Gerät wird nur angeboten, wenn `kind` gesetzt ist (`battery`, `inverter`, `energy-meter`, `grid-connection-point`, `heat-pump`, `thermostat`, `switch`) und das für den HCU-Archetyp nötige Feature vorhanden ist. Werte werden nie erfunden.
 - Standard-Capability-IDs: `battery_level` (%, wird zu 0..1), `battery_capacity_wh`, `power_w`, `energy_in_kwh`, `energy_out_kwh`, `target_temperature_c`, `operation_mode`, `on`.
-- `CONTROL_REQUEST` läuft über den `ActionDispatcher` und damit durch die Safety-Policy. Im Plugin ist aktuell eine Deny-all-Policy aktiv: Steuerung ist gesperrt, bis ein Safety-Modul existiert.
+- `CONTROL_REQUEST` läuft über den `ActionDispatcher` und eine zentrale Allowlist. Geräteaktionen bleiben standardmäßig gesperrt; die Buderus-Solltemperatur für Heizkreis 2 wird nur nach expliziter Aktivierung in der Plugin-Konfiguration erlaubt.
 - Der Inklusionsstatus liegt nur im Speicher (nicht persistent).
 - Die Anker- und EMS-ESP-Geräte werden erst nach erfolgreicher Konfiguration der jeweiligen Integration angeboten.
 
-## Buderus über BBQKees EMS-ESP (vorbereitet, nur lesend)
+## Buderus über BBQKees EMS-ESP
 
-- Adapter: `src/adapters/buderus/ems-esp-adapter.ts`; der Client fragt lokal `GET /api/boiler/values` und `GET /api/thermostat/values` ab. Nicht vorhandene Endpunkte (HTTP 404) werden übersprungen.
-- In HCUweb unter Plugin-Konfiguration `Buderus / EMS-ESP` die Gateway-Adresse eintragen, z. B. `http://192.168.178.x`. Ein API-Token ist optional und wird nur benötigt, wenn der Gateway-API-Zugriff geschützt ist. Der Wert wird in `/data/buderus.json` mit Dateirechten `600` gespeichert.
-- Gelesene primitive Werte werden dynamisch als Fähigkeiten registriert. Ein erkannter Thermostat-Sollwert (z. B. EMS-ESP `seltemp`) wird als `target_temperature_c` an die HCU gemappt. Der Kessel erhält derzeit keine HCU-Geräteklasse, da die Connect-API hier kein verifiziertes Boiler-Archetyp-Mapping hat; seine Werte werden im HomeFlow-Gerätemodell gehalten, aber nicht als HCU-Gerät angeboten.
-- Polling alle 30 Sekunden. Keine Schreibzugriffe; `execute()` weist Befehle ausdrücklich zurück. Die reale Erkennung, Modellnamen und Messwerte für GB125-18/RC35 müssen nach Anschluss des Gateways verifiziert werden.
+- Adapter: `src/adapters/buderus/ems-esp-adapter.ts`; der Client fragt lokal `GET /api/boiler/values` und `GET /api/thermostat/values` ab. Das Plugin akzeptiert eine nackte IP/Hostname-Adresse oder eine URL und normalisiert doppelte `http://`-Präfixe. Nicht vorhandene Endpunkte (HTTP 404) werden übersprungen.
+- Live verifiziert über die Gateway-Oberfläche: `GET /api/system/info` meldet EMS-ESP 3.8.6, Modell `BBQKees Electronics E32V2.2 rev.2.2/2026092`, Netzwerk-IP `192.168.178.99`, EMS-Bus `connected` mit Protokoll `Buderus`. Erkannt: Boiler `Logano GB1*5, Logamatic MC10` (Produkt-ID 72, Version 02.07), Thermostat `RC35` (Produkt-ID 86, Version 01.06), Mixer `MM10`, Controller `BC10, RFM20` sowie Sensoren. MQTT ist nicht verbunden und nicht erforderlich. Die genaue Zuordnung der Boilerkennung zum Kessel-Typenschild ist nicht bestätigt.
+- `GET /api/boiler/values` liefert unter anderem Vorlauf (`curflowtemp`), Kesseltemperatur (`boiltemp`), Außentemperatur (`outdoortemp`), Brenner-/Heizstatus und Warmwasserdaten (`dhw.curtemp`, `dhw.seltemp`). Beim letzten Auslesen: Vorlauf 68,4 °C, Kessel 68,2 °C, Außentemperatur 8,9 °C und Warmwasser 58,2 °C.
+- `GET /api/thermostat/values` meldet den Regler unter `hc2`: Solltemperatur `seltemp` 21,5 °C, Isttemperatur `currtemp` 21,8 °C und Modus `auto`. Die HCU erhält den Heizkreis-2-Sollwert als `target_temperature_c`. Polling erfolgt alle 30 Sekunden.
+- Steuerung ist standardmäßig aus. In HCUweb kann ausdrücklich nur **RC35-Solltemperatur Heizkreis 2** freigeschaltet werden, begrenzt auf 5–25 °C. EMS-ESP dokumentiert `POST /api/thermostat/hc2/seltemp` mit JSON-Body `{"data": <Temperatur>}`. Im HCUweb-Feld wird dafür ein EMS-ESP API-Token benötigt; auf diesem Gateway ist `noTokenApi=false`. Den Token im EMS-ESP-Webinterface unter **Settings → Security → Manage Users** für den Admin-Benutzer erzeugen. Das Token nur direkt in HCUweb eingeben, nicht hier teilen. Steuerung anderer Heizkreise, Betriebsarten und Warmwasser bleibt gesperrt.
+- Gateway-Adresse und Token (Dateirechte `600`) werden in `/data/buderus.json` gespeichert. HTTP-Fehler, insbesondere fehlender/abgelehnter Schreib-Token, werden an HCUweb zurückgemeldet.
 
 ## Anker Solarbank (Cloud, nur lesend)
 

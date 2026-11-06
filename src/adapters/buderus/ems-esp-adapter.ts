@@ -8,6 +8,8 @@ import type { DeviceAdapter } from "../device-adapter.js";
 import { EmsEspClient, type EmsEspDeviceData, type EmsEspValue } from "./ems-esp-client.js";
 
 export const EMS_ESP_ADAPTER_ID = "buderus-ems-esp";
+export const RC35_HC2_SETPOINT_MIN_C = 5;
+export const RC35_HC2_SETPOINT_MAX_C = 25;
 
 const DEVICE_TYPES = ["boiler", "thermostat"] as const;
 type EmsEspDeviceType = (typeof DEVICE_TYPES)[number];
@@ -16,7 +18,10 @@ export class EmsEspAdapter implements DeviceAdapter {
   readonly id = EMS_ESP_ADAPTER_ID;
   private known = new Map<string, EmsEspDeviceData>();
 
-  constructor(private readonly client: EmsEspClient) {}
+  constructor(
+    private readonly client: EmsEspClient,
+    private readonly setpointControlHc2 = false,
+  ) {}
 
   async discover(): Promise<readonly DeviceDefinition[]> {
     const definitions: DeviceDefinition[] = [];
@@ -27,7 +32,7 @@ export class EmsEspAdapter implements DeviceAdapter {
         continue;
       }
       known.set(deviceId(type), data);
-      definitions.push(toDefinition(type, data.values));
+      definitions.push(toDefinition(type, data.values, this.setpointControlHc2));
     }
     if (definitions.length === 0) {
       throw new Error("EMS-ESP meldet weder einen Heizkessel noch einen Thermostat.");
@@ -47,7 +52,7 @@ export class EmsEspAdapter implements DeviceAdapter {
     }
     this.known.set(id, data);
     const observedAt = new Date().toISOString();
-    const setpointField = type === "thermostat" ? findSetpointField(data.values) : undefined;
+    const setpointField = type === "thermostat" ? findHc2SetpointField(data.values) : undefined;
     return Object.entries(data.values).map(([field, value]) => ({
       capabilityId:
         type === "thermostat" && field === setpointField
@@ -58,13 +63,27 @@ export class EmsEspAdapter implements DeviceAdapter {
     }));
   }
 
-  async execute(_command: DeviceCommand): Promise<void> {
-    throw new Error("EMS-ESP-Steuerung ist in HomeFlow deaktiviert; die Integration ist nur lesend.");
+  async execute(command: DeviceCommand): Promise<void> {
+    if (
+      !this.setpointControlHc2 ||
+      command.deviceId !== deviceId("thermostat") ||
+      command.capabilityId !== "target_temperature_c" ||
+      typeof command.value !== "number" ||
+      command.value < RC35_HC2_SETPOINT_MIN_C ||
+      command.value > RC35_HC2_SETPOINT_MAX_C
+    ) {
+      throw new Error("Nur die freigegebene RC35-Solltemperatur in Heizkreis 2 (5 bis 25 °C) kann gesetzt werden.");
+    }
+    await this.client.setThermostatHc2Setpoint(command.value);
   }
 }
 
-function toDefinition(type: EmsEspDeviceType, values: Readonly<Record<string, EmsEspValue>>): DeviceDefinition {
-  const setpointField = type === "thermostat" ? findSetpointField(values) : undefined;
+function toDefinition(
+  type: EmsEspDeviceType,
+  values: Readonly<Record<string, EmsEspValue>>,
+  setpointControlHc2: boolean,
+): DeviceDefinition {
+  const setpointField = type === "thermostat" ? findHc2SetpointField(values) : undefined;
   const kind: DeviceKind | undefined = setpointField ? "thermostat" : undefined;
   return {
     id: deviceId(type),
@@ -80,17 +99,21 @@ function toDefinition(type: EmsEspDeviceType, values: Readonly<Record<string, Em
         label: mappedSetpoint ? "Solltemperatur" : field,
         type: valueType(value),
         readable: true,
-        writable: false,
+        writable: mappedSetpoint && setpointControlHc2,
         supportStatus: "SUPPORTED",
+        ...(mappedSetpoint && {
+          min: RC35_HC2_SETPOINT_MIN_C,
+          max: RC35_HC2_SETPOINT_MAX_C,
+        }),
         ...(mappedSetpoint && { unit: "°C" }),
       };
     }),
   };
 }
 
-function findSetpointField(values: Readonly<Record<string, EmsEspValue>>): string | undefined {
+function findHc2SetpointField(values: Readonly<Record<string, EmsEspValue>>): string | undefined {
   return Object.keys(values).find((field) =>
-    /(^|_)(seltemp|setpoint|set_temp|target_temperature|targettemp)(_|$)/i.test(field),
+    /^hc2_(seltemp|setpoint|set_temp|target_temperature|targettemp)$/i.test(field),
   );
 }
 

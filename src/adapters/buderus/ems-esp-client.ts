@@ -20,19 +20,7 @@ export class EmsEspClient {
     private readonly accessToken?: string,
     private readonly fetcher: typeof fetch = fetch,
   ) {
-    let url: URL;
-    try {
-      url = new URL(gatewayUrl);
-    } catch {
-      throw new EmsEspApiError("Die EMS-ESP-Adresse ist keine gültige URL.");
-    }
-    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) {
-      throw new EmsEspApiError("Die EMS-ESP-Adresse muss eine HTTP(S)-URL ohne Zugangsdaten sein.");
-    }
-    url.pathname = "/";
-    url.search = "";
-    url.hash = "";
-    this.baseUrl = url;
+    this.baseUrl = new URL(normalizeGatewayUrl(gatewayUrl));
   }
 
   async fetchDevice(device: EmsEspDeviceData["device"]): Promise<EmsEspDeviceData | undefined> {
@@ -61,6 +49,61 @@ export class EmsEspClient {
     }
     return { device, values: extractValues(payload) };
   }
+
+  async setThermostatHc2Setpoint(value: number): Promise<void> {
+    const url = new URL("/api/thermostat/hc2/seltemp", this.baseUrl);
+    const headers: Record<string, string> = {
+      accept: "application/json",
+      "content-type": "application/json",
+    };
+    if (this.accessToken) {
+      headers.authorization = this.accessToken;
+    }
+    let response: Response;
+    try {
+      response = await this.fetcher(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ data: value }),
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch (error) {
+      throw new EmsEspApiError(`EMS-ESP Heizkreis 2 konnte nicht gesetzt werden: ${describe(error)}`);
+    }
+    if (!response.ok) {
+      const message =
+        response.status === 401 || response.status === 403
+          ? "EMS-ESP hat den Schreibzugriff abgelehnt; API-Token und EMS-ESP-Berechtigung prüfen."
+          : `EMS-ESP Heizkreis 2 API antwortete mit HTTP ${response.status}.`;
+      throw new EmsEspApiError(message, response.status);
+    }
+  }
+}
+
+export function normalizeGatewayUrl(input: string): string {
+  let value = input.trim();
+  if (!value) {
+    throw new EmsEspApiError("Bitte die Adresse des EMS-ESP-Gateways eintragen.");
+  }
+  while (/^https?:\/\/https?:\/\//i.test(value)) {
+    value = value.replace(/^https?:\/\//i, "");
+  }
+  if (!/^https?:\/\//i.test(value)) {
+    value = `http://${value}`;
+  }
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new EmsEspApiError("Die EMS-ESP-Adresse ist keine gültige URL.");
+  }
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || !url.hostname) {
+    throw new EmsEspApiError("Die EMS-ESP-Adresse muss eine HTTP(S)-Adresse ohne Zugangsdaten sein.");
+  }
+  url.pathname = "/";
+  url.search = "";
+  url.hash = "";
+  return url.origin;
 }
 
 function extractValues(payload: unknown): Record<string, EmsEspValue> {
